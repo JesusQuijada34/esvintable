@@ -18,7 +18,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 
 # ===== CONFIGURACIÓN GLOBAL =====
-VERSION = "4.2"
+VERSION = "5.0"
 REPO_URL = "https://github.com/JesusQuijada34/esvintable"
 REPO_RAW_URL = "https://raw.githubusercontent.com/JesusQuijada34/esvintable/main/"
 DETAILS_XML_URL = REPO_RAW_URL + "details.xml"
