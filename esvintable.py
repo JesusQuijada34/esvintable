@@ -1,5 +1,7 @@
+#!/usr/bin/env python3
 # @JesusQuijada34 | @jq34_channel | @jq34_group
-# PyQt5 GUI version - Trebel esVint.v2
+# Console version - Trebel esVint.v2
+# Compatible with Android (Termux) and traditional consoles
 # Remix from: @SiMijoSiManda | @simijosimethodleaks
 # Github: github.com/JesusQuijada34/esvintable/
 
@@ -7,52 +9,11 @@ import sys
 import os
 import requests
 import cloudscraper
-
-from PyQt5.QtWidgets import (
-    QApplication, QWidget, QVBoxLayout, QLabel, QLineEdit, QPushButton, QTextEdit, QMessageBox, QFileDialog
-)
-from PyQt5.QtCore import Qt
-
-# ====================
-# QSS - GithubLike Assets
-# ====================
-GITHUBLIKE_QSS = """
-QWidget {
-    background-color: #0d1117;
-    color: #c9d1d9;
-    font-family: 'Segoe UI', 'Liberation Sans', Arial, sans-serif;
-    font-size: 14px;
-}
-QLabel {
-    color: #58a6ff;
-    font-weight: bold;
-}
-QLineEdit, QTextEdit {
-    background-color: #161b22;
-    border: 1px solid #30363d;
-    border-radius: 4px;
-    color: #c9d1d9;
-    padding: 4px;
-}
-QPushButton {
-    background-color: #238636;
-    color: #fff;
-    border: none;
-    border-radius: 4px;
-    padding: 6px 12px;
-    font-weight: bold;
-}
-QPushButton:hover {
-    background-color: #2ea043;
-}
-QPushButton:pressed {
-    background-color: #196c2e;
-}
-QMessageBox {
-    background-color: #161b22;
-    color: #c9d1d9;
-}
-"""
+import platform
+import subprocess
+import tempfile
+import re
+from urllib.parse import urlparse
 
 PROVIDERS = [
     'Warner', 'Orchard', 'SonyMusic', 'UMG', 'INgrooves', 'Fuga', 'Vydia', 'Empire',
@@ -62,6 +23,59 @@ PROVIDERS = [
 TREBEL_TOKEN = (
     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIxODkyNDQ0MDEiLCJkZXZpY2VJZCI6IjE1NDAyNjIyMCIsInRyYW5zYWN0aW9uSWQiOjAsImlhdCI6MTc0Mjk4ODg5MX0.Cyj5j4HAmRZpCXQacS8I24p5_hWhIqPdMqb_NVKS4mI"
 )
+
+def clear_screen():
+    """Limpia la pantalla de manera compatible con múltiples plataformas"""
+    os.system('cls' if os.name == 'nt' else 'clear')
+
+def print_banner():
+    banner = """
+    ╔══════════════════════════════════════════════════╗
+    ║             ESVINTABLE - Trebel esVint.v2        ║
+    ║          Versión Consola (Android compatible)    ║
+    ║      Con extracción de ISRC desde audio/URL      ║
+    ╚══════════════════════════════════════════════════╝
+    """
+    print(banner)
+
+def print_menu():
+    """Muestra el menú principal"""
+    menu = """
+    ╔══════════════════════════════════════════════════╗
+    ║                   MENÚ PRINCIPAL                 ║
+    ╠══════════════════════════════════════════════════╣
+    ║ 1. Descargar por ISRC                            ║
+    ║ 2. Extraer ISRC desde archivo de audio           ║
+    ║ 3. Extraer ISRC desde URL                        ║
+    ║ 4. Verificar ubicación                           ║
+    ║ 5. Salir                                         ║
+    ╚══════════════════════════════════════════════════╝
+    """
+    print(menu)
+
+def get_user_choice():
+    """Obtiene la elección del usuario"""
+    while True:
+        try:
+            choice = input("\nSelecciona una opción (1-5): ").strip()
+            if choice in ['1', '2', '3', '4', '5']:
+                return choice
+            else:
+                print("❌ Opción no válida. Por favor, elige entre 1 y 5.")
+        except KeyboardInterrupt:
+            print("\n👋 ¡Hasta luego!")
+            sys.exit(0)
+
+def get_output_directory():
+    """Solicita al usuario el directorio de salida"""
+    default_dir = "op"
+    print(f"\n📁 Directorio de salida (presiona Enter para usar '{default_dir}'):")
+    output_dir = input().strip()
+    return output_dir if output_dir else default_dir
+
+def press_enter_to_continue():
+    """Espera a que el usuario presione Enter"""
+    input("\n⏎ Presiona Enter para continuar...")
 
 def get_country_code():
     try:
@@ -76,7 +90,7 @@ def download_isrc(isrc, output_dir, log_callback=None):
         ep = f"https://mds.projectcarmen.com/stream/download?provider={provider}&isrc={isrc}"
         headers = {"Authorization": f"Bearer {TREBEL_TOKEN}"}
         if log_callback:
-            log_callback(f"Solicitando API para {provider}...")
+            log_callback(f"🔍 Solicitando API para {provider}...")
         try:
             r = s.get(ep, headers=headers, timeout=15)
             if r.status_code == 200:
@@ -86,100 +100,262 @@ def download_isrc(isrc, output_dir, log_callback=None):
                 with open(fn, "wb") as o:
                     o.write(r.content)
                 if log_callback:
-                    log_callback(f"Archivo guardado como: {fn}\n")
+                    log_callback(f"💾 Archivo guardado como: {fn}\n")
                 return True, fn
             else:
                 if log_callback:
-                    log_callback(f"Proveedor {provider}: {r.status_code} - {r.text}")
+                    log_callback(f"❌ Proveedor {provider}: {r.status_code} - {r.text}")
         except requests.exceptions.RequestException as o:
             if log_callback:
-                log_callback(f"Error de red para '{provider}': {o}")
+                log_callback(f"🌐 Error de red para '{provider}': {o}")
     return False, None
 
-class EsVintableApp(QWidget):
-    def __init__(self):
-        super().__init__()
-        self.setWindowTitle("ESVINTABLE - Trebel esVint.v2")
-        self.setMinimumWidth(500)
-        self.init_ui()
-
-    def init_ui(self):
-        layout = QVBoxLayout()
-
-        self.banner = QLabel("ESVINTABLE - Trebel esVint.v2")
-        self.banner.setAlignment(Qt.AlignCenter)
-        layout.addWidget(self.banner)
-
-        self.isrc_label = QLabel("ISRC:")
-        layout.addWidget(self.isrc_label)
-
-        self.isrc_input = QLineEdit()
-        self.isrc_input.setPlaceholderText("Introduce el ISRC aquí...")
-        layout.addWidget(self.isrc_input)
-
-        self.output_label = QLabel("Directorio de salida:")
-        layout.addWidget(self.output_label)
-
-        self.output_dir_input = QLineEdit()
-        self.output_dir_input.setText("op")
-        layout.addWidget(self.output_dir_input)
-
-        self.browse_btn = QPushButton("Seleccionar carpeta")
-        self.browse_btn.clicked.connect(self.select_output_dir)
-        layout.addWidget(self.browse_btn)
-
-        self.download_btn = QPushButton("Descargar")
-        self.download_btn.clicked.connect(self.handle_download)
-        layout.addWidget(self.download_btn)
-
-        self.log_output = QTextEdit()
-        self.log_output.setReadOnly(True)
-        layout.addWidget(self.log_output)
-
-        self.setLayout(layout)
-
-    def select_output_dir(self):
-        dir_path = QFileDialog.getExistingDirectory(self, "Selecciona el directorio de salida")
-        if dir_path:
-            self.output_dir_input.setText(dir_path)
-
-    def log(self, message):
-        self.log_output.append(message)
-        self.log_output.ensureCursorVisible()
-
-    def handle_download(self):
-        isrc = self.isrc_input.text().strip()
-        output_dir = self.output_dir_input.text().strip()
-        if not isrc:
-            QMessageBox.warning(self, "Error", "¡El campo ISRC está vacío!")
-            return
-
-        self.log_output.clear()
-        self.log(f"Verificando país...")
-
-        country = get_country_code()
-        if not country:
-            QMessageBox.critical(self, "Error", "No se pudo obtener el país. ¿Conexión a internet?")
-            return
-
-        if country != "US":
-            QMessageBox.critical(self, "Error", "¡Usa VPN o Proxy para 'US' (campo country)!")
-            self.log(f"País detectado: {country}. Se requiere US.")
-            return
-
-        self.log(f"País detectado: {country}. Iniciando descarga para ISRC: {isrc}...")
-        success, filename = download_isrc(isrc, output_dir, log_callback=self.log)
-        if success:
-            QMessageBox.information(self, "Éxito", f"Descarga completada: {filename}")
+def extract_isrc_from_file(file_path):
+    """Extrae el ISRC de un archivo de audio usando ffprobe"""
+    try:
+        # Verificar si ffprobe está disponible
+        result = subprocess.run(['ffprobe', '-version'], capture_output=True, text=True)
+        if result.returncode != 0:
+            return None, "❌ ffprobe no está instalado. Instala ffmpeg para extraer metadatos."
+        
+        # Ejecutar ffprobe para obtener metadatos
+        cmd = [
+            'ffprobe', 
+            '-v', 'quiet',
+            '-print_format', 'json',
+            '-show_format',
+            '-show_streams',
+            file_path
+        ]
+        
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            return None, f"❌ Error al analizar el archivo: {result.stderr}"
+        
+        # Buscar ISRC en los metadatos
+        metadata = result.stdout
+        isrc_match = re.search(r'"ISRC"\s*:\s*"([^"]+)"', metadata)
+        if isrc_match:
+            return isrc_match.group(1), None
         else:
-            QMessageBox.warning(self, "Fallo", "No se pudo descargar el archivo con ningún proveedor.")
+            return None, "❌ No se encontró ISRC en los metadatos del archivo."
+            
+    except Exception as e:
+        return None, f"❌ Error al extraer ISRC: {str(e)}"
+
+def download_file_from_url(url, output_path):
+    """Descarga un archivo desde una URL"""
+    try:
+        response = requests.get(url, stream=True, timeout=30)
+        if response.status_code == 200:
+            with open(output_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            return True, None
+        else:
+            return False, f"❌ Error HTTP {response.status_code}"
+    except Exception as e:
+        return False, f"❌ Error al descargar: {str(e)}"
+
+def extract_isrc_from_url(url):
+    """Extrae ISRC desde una URL descargando primero el archivo"""
+    try:
+        # Crear un archivo temporal
+        with tempfile.NamedTemporaryFile(suffix='.audio', delete=False) as tmp_file:
+            tmp_path = tmp_file.name
+        
+        # Descargar el archivo
+        print(f"📥 Descargando archivo desde URL...")
+        success, error = download_file_from_url(url, tmp_path)
+        if not success:
+            os.unlink(tmp_path)
+            return None, error
+        
+        # Extraer ISRC
+        print("🔍 Extrayendo ISRC del archivo...")
+        isrc, error = extract_isrc_from_file(tmp_path)
+        
+        # Limpiar archivo temporal
+        os.unlink(tmp_path)
+        
+        return isrc, error
+        
+    except Exception as e:
+        return None, f"❌ Error al procesar URL: {str(e)}"
+
+def verify_location():
+    """Verifica la ubicación del usuario"""
+    print("🌍 Verificando país...")
+    country = get_country_code()
+    
+    if not country:
+        print("❌ Error: No se pudo obtener el país. ¿Conexión a internet?")
+        return False
+    
+    print(f"📍 País detectado: {country}")
+    
+    if country != "US":
+        print("❌ Error: ¡Se requiere ubicación en US (Estados Unidos)!")
+        print("🔒 Usa VPN o Proxy para cambiar tu ubicación a US")
+        return False
+    
+    print("✅ Ubicación verificada correctamente (US)")
+    return True
+
+def download_by_isrc():
+    """Función para descargar por ISRC directamente"""
+    clear_screen()
+    print_banner()
+    print("⬇️  DESCARGA POR ISRC DIRECTAMENTE\n")
+    
+    isrc = input("Introduce el código ISRC: ").strip()
+    if not isrc:
+        print("❌ Debes introducir un código ISRC válido.")
+        press_enter_to_continue()
+        return
+    
+    output_dir = get_output_directory()
+    
+    if not verify_location():
+        press_enter_to_continue()
+        return
+    
+    print(f"\n🚀 Iniciando descarga para ISRC: {isrc}...")
+    print(f"📁 Directorio de salida: {output_dir}")
+    print("-" * 50)
+    
+    success, filename = download_isrc(isrc, output_dir, log_callback=print)
+    
+    if success:
+        print("\n✅ ¡Descarga completada exitosamente!")
+        print(f"💾 Archivo: {filename}")
+        
+        # En Android, mostrar la ruta completa
+        is_android = "ANDROID_ROOT" in os.environ or "TERMUX_VERSION" in os.environ
+        if is_android:
+            full_path = os.path.abspath(filename)
+            print(f"📂 Ruta completa: {full_path}")
+    else:
+        print("\n❌ Error: No se pudo descargar el archivo con ningún proveedor.")
+    
+    press_enter_to_continue()
+
+def extract_from_file():
+    """Función para extraer ISRC desde archivo"""
+    clear_screen()
+    print_banner()
+    print("📁 EXTRAER ISRC DESDE ARCHIVO DE AUDIO\n")
+    
+    file_path = input("Introduce la ruta del archivo de audio: ").strip()
+    if not file_path or not os.path.isfile(file_path):
+        print("❌ La ruta del archivo no es válida o el archivo no existe.")
+        press_enter_to_continue()
+        return
+    
+    print(f"🔍 Extrayendo ISRC desde: {file_path}")
+    isrc, error = extract_isrc_from_file(file_path)
+    
+    if isrc:
+        print(f"\n✅ ISRC extraído: {isrc}")
+        
+        # Preguntar si quiere descargar
+        download_choice = input("\n¿Quieres descargar este archivo? (s/n): ").strip().lower()
+        if download_choice in ['s', 'si', 'sí', 'y', 'yes']:
+            output_dir = get_output_directory()
+            
+            if verify_location():
+                print(f"\n🚀 Iniciando descarga para ISRC: {isrc}...")
+                success, filename = download_isrc(isrc, output_dir, log_callback=print)
+                
+                if success:
+                    print("\n✅ ¡Descarga completada exitosamente!")
+                    print(f"💾 Archivo: {filename}")
+                else:
+                    print("\n❌ Error: No se pudo descargar el archivo.")
+    else:
+        print(f"\n{error}")
+    
+    press_enter_to_continue()
+
+def extract_from_url():
+    """Función para extraer ISRC desde URL"""
+    clear_screen()
+    print_banner()
+    print("🌐 EXTRAER ISRC DESDE URL\n")
+    
+    url = input("Introduce la URL del archivo de audio: ").strip()
+    if not url or not url.startswith(('http://', 'https://')):
+        print("❌ URL no válida. Debe comenzar con http:// o https://")
+        press_enter_to_continue()
+        return
+    
+    print(f"🔍 Extrayendo ISRC desde: {url}")
+    isrc, error = extract_isrc_from_url(url)
+    
+    if isrc:
+        print(f"\n✅ ISRC extraído: {isrc}")
+        
+        # Preguntar si quiere descargar
+        download_choice = input("\n¿Quieres descargar este archivo? (s/n): ").strip().lower()
+        if download_choice in ['s', 'si', 'sí', 'y', 'yes']:
+            output_dir = get_output_directory()
+            
+            if verify_location():
+                print(f"\n🚀 Iniciando descarga para ISRC: {isrc}...")
+                success, filename = download_isrc(isrc, output_dir, log_callback=print)
+                
+                if success:
+                    print("\n✅ ¡Descarga completada exitosamente!")
+                    print(f"💾 Archivo: {filename}")
+                else:
+                    print("\n❌ Error: No se pudo descargar el archivo.")
+    else:
+        print(f"\n{error}")
+    
+    press_enter_to_continue()
+
+def check_location():
+    """Función para verificar ubicación"""
+    clear_screen()
+    print_banner()
+    print("🌍 VERIFICAR UBICACIÓN\n")
+    
+    verify_location()
+    press_enter_to_continue()
 
 def main():
-    app = QApplication(sys.argv)
-    app.setStyleSheet(GITHUBLIKE_QSS)
-    window = EsVintableApp()
-    window.show()
-    sys.exit(app.exec_())
+    """Función principal con menú interactivo"""
+    while True:
+        try:
+            clear_screen()
+            print_banner()
+            print_menu()
+            
+            choice = get_user_choice()
+            
+            if choice == '1':
+                download_by_isrc()
+            elif choice == '2':
+                extract_from_file()
+            elif choice == '3':
+                extract_from_url()
+            elif choice == '4':
+                check_location()
+            elif choice == '5':
+                print("\n👋 ¡Hasta luego!")
+                break
+                
+        except KeyboardInterrupt:
+            print("\n👋 ¡Hasta luego!")
+            break
+        except Exception as e:
+            print(f"\n❌ Error inesperado: {e}")
+            press_enter_to_continue()
 
 if __name__ == "__main__":
+    # Verificar si estamos en Android
+    is_android = "ANDROID_ROOT" in os.environ or "TERMUX_VERSION" in os.environ
+    if is_android:
+        print("✅ Detectado entorno Android (Termux)")
+    
     main()
