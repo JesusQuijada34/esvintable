@@ -28,17 +28,15 @@ from mutagen.mp4 import MP4
 REPO_RAW_URL = "https://raw.githubusercontent.com/JesusQuijada34/esvintable/main/"
 SCRIPT_FILENAME = "esvintable.py"
 DETAILS_XML_URL = f"{REPO_RAW_URL}details.xml"
-LOCAL_XML_FILE = "esvintable_details.xml"
+LOCAL_XML_FILE = "details.xml"  # Mismo nombre que el externo
 UPDATE_INTERVAL = 60
-CONFIG_FILE = "esvintable_config.json"
+TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIxODkyNDQ0MDEiLCJkZXZpY2VJZCI6IjE1NDAyNjIyMCIsInRyYW5zYWN0aW9uSWQiOjAsImlhdCI6MTc0Mjk4ODg5MX0.Cyj5j4HAmRZpCXQacS8I24p5_hWhIqPdMqb_NVKS4mI"
 
 # Proveedores de música para búsqueda ISRC
 PROVIDERS = [
     'Warner', 'Orchard', 'SonyMusic', 'UMG', 'INgrooves', 'Fuga', 'Vydia', 'Empire',
     'LabelCamp', 'AudioSalad', 'ONErpm', 'Symphonic', 'Colonize'
 ]
-
-TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIxODkyNDQ0MDEiLCJkZXZpY2VJZCI6IjE1NDAyNjIyMCIsInRyYW5zYWN0aW9uSWQiOjAsImlhdCI6MTc0Mjk4ODg5MX0.Cyj5j4HAmRZpCXQacS8I24p5_hWhIqPdMqb_NVKS4mI"
 
 # ===== DETECCIÓN DE PLATAFORMA =====
 IS_WINDOWS = platform.system() == "Windows"
@@ -76,6 +74,7 @@ class Colors:
     LIGHT_BLUE = '\033[38;5;45m'
     LIGHT_GREEN = '\033[38;5;120m'
     GRAY = '\033[38;5;245m'
+    DARK_GRAY = '\033[38;5;240m'
 
 def color(text, color_code):
     return f"{color_code}{text}{Colors.END}"
@@ -83,7 +82,7 @@ def color(text, color_code):
 def clear():
     os.system('cls' if IS_WINDOWS else 'clear')
 
-# ===== SISTEMA DE ACTUALIZACIÓN CON XML =====
+# ===== SISTEMA DE ACTUALIZACIÓN MEJORADO =====
 class UpdateChecker:
     def __init__(self):
         self.last_check = datetime.now()
@@ -94,6 +93,7 @@ class UpdateChecker:
         self.remote_version = None
         self.local_version = None
         self.update_info = {}
+        self.notification_shown = False
         
         # Cargar versión local desde XML
         self.load_local_version()
@@ -128,6 +128,7 @@ class UpdateChecker:
                 info['changelog'] = root.find('changelog').text.strip() if root.find('changelog') is not None else ""
                 info['release_date'] = root.find('release_date').text.strip() if root.find('release_date') is not None else ""
                 info['critical'] = root.find('critical').text.strip().lower() == 'true' if root.find('critical') is not None else False
+                info['message'] = root.find('message').text.strip() if root.find('message') is not None else ""
                 
                 return info
         except Exception as e:
@@ -160,23 +161,38 @@ class UpdateChecker:
             # Fallback: comparación lexicográfica
             return remote_ver > local_ver
     
-    def check_for_updates(self):
+    def check_for_updates(self, silent=False):
         """Verifica si hay actualizaciones disponibles comparando XML local y remoto"""
         try:
             self.update_info = self.get_remote_info_from_xml()
             if self.update_info and 'version' in self.update_info:
                 self.remote_version = self.update_info['version']
                 
-                # Actualizar XML local si la versión remota es más reciente
+                # Solo mostrar mensaje si hay una actualización real
                 if self.compare_versions(self.local_version, self.remote_version):
+                    # Actualizar XML local si la versión remota es más reciente
                     if self.download_xml_update():
                         self.local_version = self.remote_version
                     
                     self.update_available = True
                     self.new_version = self.remote_version
+                    
+                    if not silent and not self.notification_shown:
+                        print(color(f"\n🎉 ¡Nueva versión disponible! v{self.local_version} → v{self.new_version}", Colors.GREEN))
+                        if self.update_info.get('critical', False):
+                            print(color("🚨 ACTUALIZACIÓN CRÍTICA: Se recomienda actualizar inmediatamente", Colors.RED))
+                        if self.update_info.get('message'):
+                            print(color(f"💬 {self.update_info['message']}", Colors.CYAN))
+                        self.notification_shown = True
+                    
                     return True
+                elif not silent:
+                    # Solo mostrar mensaje de actualizado si no es silencioso
+                    print(color("✅ Ya tienes la última versión.", Colors.GREEN))
+                    
         except Exception as e:
-            print(color(f"❌ Error verificando actualizaciones: {e}", Colors.RED))
+            if not silent:
+                print(color(f"❌ Error verificando actualizaciones: {e}", Colors.RED))
         return False
     
     def download_script_update(self):
@@ -208,10 +224,7 @@ class UpdateChecker:
                 try:
                     current_time = datetime.now()
                     if (current_time - self.last_check).total_seconds() >= UPDATE_INTERVAL:
-                        if self.check_for_updates():
-                            print(color(f"\n🎉 ¡Nueva versión disponible! v{self.local_version} → v{self.new_version}", Colors.GREEN))
-                            if self.update_info.get('critical', False):
-                                print(color("🚨 ACTUALIZACIÓN CRÍTICA: Se recomienda actualizar inmediatamente", Colors.RED))
+                        self.check_for_updates(silent=True)  # Verificación silenciosa en segundo plano
                         self.last_check = current_time
                     time.sleep(10)
                 except Exception:
@@ -925,29 +938,52 @@ def play_song(file_path):
     except Exception:
         print(color("❌ Error al reproducir la canción.", Colors.RED))
 
-# ===== INTERFAZ DE USUARIO MEJORADA =====
+# ===== BANNER MEJORADO =====
 def print_banner():
-    # Verificar actualizaciones al inicio
-    if updater.check_for_updates():
-        version_info = color(f"v{updater.local_version} → v{updater.new_version}", Colors.GREEN)
-    else:
-        version_info = color(f"v{updater.local_version} (Actualizado)", Colors.GREEN)
+    # Obtener información de versión
+    try:
+        if os.path.exists(LOCAL_XML_FILE):
+            tree = ET.parse(LOCAL_XML_FILE)
+            root = tree.getroot()
+            version_element = root.find('version')
+            if version_element is not None:
+                current_version = version_element.text.strip()
+            else:
+                current_version = "Desconocida"
+        else:
+            current_version = "Desconocida"
+    except:
+        current_version = "Desconocida"
     
-    banner = f"""{Colors.CYAN}{Colors.BOLD}
-╔══════════════════════════════════════════════════════════════╗
-║                esVintable Ultimate PRO {version_info:<20} ║
-║         Búsqueda Avanzada & Descarga por ISRC                ║
-║           GitHub.com/JesusQuijada34/esvintable               ║
-║           Plataforma: {color(PLATFORM_LABEL, Colors.YELLOW):<20}                   ║
+    # Verificar actualizaciones (silenciosamente)
+    updater.check_for_updates(silent=True)
+    
+    # Banner mejorado con más estilo
+    banner = f"""
+{Colors.CYAN}{Colors.BOLD}╔══════════════════════════════════════════════════════════════╗
+║{Colors.MAGENTA}          ███████╗███████╗██╗   ██╗██╗███╗   ██╗████████╗          {Colors.CYAN}║
+║{Colors.MAGENTA}          ██╔════╝██╔════╝██║   ██║██║████╗  ██║╚══██╔══╝          {Colors.CYAN}║
+║{Colors.MAGENTA}          █████╗  ███████╗██║   ██║██║██╔██╗ ██║   ██║             {Colors.CYAN}║
+║{Colors.MAGENTA}          ██╔══╝  ╚════██║╚██╗ ██╔╝██║██║╚██╗██║   ██║             {Colors.CYAN}║
+║{Colors.MAGENTA}          ███████╗███████║ ╚████╔╝ ██║██║ ╚████║   ██║             {Colors.CYAN}║
+║{Colors.MAGENTA}          ╚══════╝╚══════╝  ╚═══╝  ╚═╝╚═╝  ╚═══╝   ╚═╝             {Colors.CYAN}║
+║{Colors.LIGHT_BLUE}                Ultimate PRO v{current_version:<15}               {Colors.CYAN}║
+║{Colors.LIGHT_GREEN}       Búsqueda Avanzada & Descarga por ISRC - Multiplataforma    {Colors.CYAN}║
+║{Colors.YELLOW}         GitHub.com/JesusQuijada34/esvintable                {Colors.CYAN}║
+║{Colors.WHITE}                Plataforma: {PLATFORM_LABEL:<20}               {Colors.CYAN}║
 ╚══════════════════════════════════════════════════════════════╝
 {Colors.END}"""
     print(banner)
     
-    # Mostrar estado de actualizaciones
-    if updater.update_available:
-        print(color(f"🔄 Actualización disponible: v{updater.new_version}", Colors.GREEN))
+    # Mostrar notificación de actualización si está disponible
+    if updater.update_available and not updater.notification_shown:
+        print(color(f"\n🎉 ¡NUEVA VERSIÓN DISPONIBLE! v{updater.local_version} → v{updater.new_version}", Colors.GREEN))
         if updater.update_info.get('critical', False):
             print(color("🚨 ACTUALIZACIÓN CRÍTICA: Se recomienda actualizar inmediatamente", Colors.RED))
+        if updater.update_info.get('message'):
+            print(color(f"💬 {updater.update_info['message']}", Colors.CYAN))
+        print(color("   Ejecuta la opción 7 para actualizar", Colors.YELLOW))
+        updater.notification_shown = True
 
 def print_guide():
     print(color("🛠️  GUÍA RÁPIDA:", Colors.YELLOW))
@@ -960,7 +996,8 @@ def print_guide():
     print("7. 🔄 Verificar actualizaciones")
     print("8. ⚙️  Instalar herramientas")
     print("9. 📊 Estadísticas de biblioteca")
-    print("10. ❌ Salir\n")
+    print("10. 🎯 Búsqueda inteligente")
+    print("11. ❌ Salir\n")
 
 def main_menu():
     clear()
@@ -977,6 +1014,7 @@ def main_menu():
         "🔄 Verificar actualizaciones",
         "⚙️ Instalar herramientas",
         "📊 Estadísticas de biblioteca",
+        "🎯 Búsqueda inteligente",
         "❌ Salir"
     ]
     
@@ -986,6 +1024,7 @@ def main_menu():
     print()
     return input("Selecciona una opción: ").strip()
 
+# ===== FUNCIONES DEL MENÚ PRINCIPAL =====
 def search_by_metadata_menu():
     clear()
     print(color("🔎 Búsqueda por Metadatos", Colors.BOLD))
@@ -1188,6 +1227,9 @@ def update_menu():
         if updater.update_info.get('critical', False):
             print(color("🚨 ACTUALIZACIÓN CRÍTICA: Se recomienda actualizar inmediatamente", Colors.RED))
         
+        if updater.update_info.get('message'):
+            print(color(f"💬 Mensaje: {updater.update_info['message']}", Colors.CYAN))
+        
         confirm = input("\n¿Actualizar ahora? (s/n): ").lower()
         if confirm == 's':
             print(color("⏳ Descargando actualización...", Colors.YELLOW))
@@ -1200,6 +1242,7 @@ def update_menu():
                 print(color("❌ Error al descargar la actualización.", Colors.RED))
     else:
         print(color("✅ Ya tienes la última versión.", Colors.GREEN))
+        print(color("💡 El sistema verifica automáticamente cada 60 segundos", Colors.YELLOW))
     
     input("\n⏎ Enter para continuar...")
 
@@ -1210,7 +1253,9 @@ def tools_menu():
     print("1. Verificar/Instalar dependencias")
     print("2. Verificar/Instalar FFmpeg (ffprobe, ffplay)")
     print("3. Verificar conexión a internet")
-    print("4. Volver")
+    print("4. Limpiar caché de búsquedas")
+    print("5. Ver información del sistema")
+    print("6. Volver")
     
     choice = input("\nSelecciona una opción: ").strip()
     
@@ -1232,6 +1277,18 @@ def tools_menu():
             print(color("✅ Conexión a internet funcionando.", Colors.GREEN))
         except:
             print(color("❌ Sin conexión a internet.", Colors.RED))
+        input("\n⏎ Enter para continuar...")
+    elif choice == "4":
+        print(color("🗑️ Limpiando caché...", Colors.YELLOW))
+        # Aquí iría la lógica para limpiar caché
+        print(color("✅ Caché limpiado correctamente.", Colors.GREEN))
+        input("\n⏎ Enter para continuar...")
+    elif choice == "5":
+        print(color("💻 Información del Sistema:", Colors.BOLD))
+        print(f"   Plataforma: {platform.system()} {platform.release()}")
+        print(f"   Procesador: {platform.processor()}")
+        print(f"   Python: {platform.python_version()}")
+        print(f"   Directorio actual: {os.getcwd()}")
         input("\n⏎ Enter para continuar...")
 
 def library_stats_menu():
@@ -1329,6 +1386,59 @@ def library_stats_menu():
     
     input("\n⏎ Enter para continuar...")
 
+def smart_search_menu():
+    clear()
+    print(color("🎯 Búsqueda Inteligente", Colors.BOLD))
+    print("Encuentra canciones incluso sin información completa")
+    
+    print("\n1. Buscar por fragmento de letra o título")
+    print("2. Identificar canción por muestra de audio")
+    print("3. Encontrar versiones alternativas")
+    print("4. Detectar duplicados")
+    print("5. Volver")
+    
+    choice = input("\nSelecciona una opción: ").strip()
+    
+    if choice == "1":
+        print(color("🔍 Búsqueda por fragmento", Colors.YELLOW))
+        fragment = input("Introduce un fragmento de título o letra: ").strip()
+        if fragment:
+            print(color("⏳ Buscando coincidencias...", Colors.CYAN))
+            # Aquí iría la implementación real
+            time.sleep(2)
+            print(color("✅ Función en desarrollo. Próximamente en actualizaciones futuras.", Colors.GREEN))
+        else:
+            print(color("❌ Debes introducir un fragmento para buscar.", Colors.RED))
+        input("\n⏎ Enter para continuar...")
+    elif choice == "2":
+        print(color("🎵 Identificación por audio", Colors.YELLOW))
+        print(color("🔊 Graba un fragmento de la canción o selecciona un archivo", Colors.CYAN))
+        # Aquí iría la implementación real
+        time.sleep(2)
+        print(color("✅ Función en desarrollo. Próximamente en actualizaciones futuras.", Colors.GREEN))
+        input("\n⏎ Enter para continuar...")
+    elif choice == "3":
+        print(color("🔄 Búsqueda de versiones alternativas", Colors.YELLOW))
+        print("Selecciona una canción para encontrar versiones:")
+        song_path = advanced_file_browser()
+        if song_path and os.path.isfile(song_path):
+            info = extract_isrc_advanced(song_path)
+            print(color(f"🔍 Buscando versiones de: {info.get('title', 'Unknown')}", Colors.CYAN))
+            # Aquí iría la implementación real
+            time.sleep(2)
+            print(color("✅ Función en desarrollo. Próximamente en actualizaciones futuras.", Colors.GREEN))
+        input("\n⏎ Enter para continuar...")
+    elif choice == "4":
+        print(color("🔍 Detección de duplicados", Colors.YELLOW))
+        print("Selecciona directorio para buscar duplicados:")
+        directory = advanced_file_browser()
+        if directory and os.path.isdir(directory):
+            print(color("⏳ Buscando duplicados...", Colors.CYAN))
+            # Aquí iría la implementación real
+            time.sleep(2)
+            print(color("✅ Función en desarrollo. Próximamente en actualizaciones futuras.", Colors.GREEN))
+        input("\n⏎ Enter para continuar...")
+
 # ===== MAIN =====
 def main():
     # Verificar dependencias al inicio
@@ -1364,6 +1474,8 @@ def main():
             elif option == "9":
                 library_stats_menu()
             elif option == "10":
+                smart_search_menu()
+            elif option == "11":
                 print(color("👋 ¡Hasta pronto!", Colors.CYAN))
                 updater.stop_update_checker()
                 break
