@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 # @JesusQuijada34 | @jq34_channel | @jq34_group
-# esVintable Ultimate v3.0 - Scanner ISRC Profundo Multiplataforma
+# esVintable Ultimate v3.1 - Scanner ISRC Profundo Multiplataforma
 # GitHub: github.com/JesusQuijada34/esvintable/
+# Última actualización: 2024-01-15
 
 import os
 import sys
@@ -15,14 +16,15 @@ import subprocess
 import tempfile
 import cloudscraper
 from datetime import datetime
-from urllib.parse import urlparse
 from pathlib import Path
+from urllib.parse import urlparse
 
 # ===== CONFIGURACIÓN GLOBAL =====
-VERSION = "3.0"
+VERSION = "3.1"
 LAST_UPDATE = "2024-01-15"
 REPO_URL = "https://raw.githubusercontent.com/JesusQuijada34/esvintable/main/esvintable_ultimate.py"
 CONFIG_FILE = "esvintable_config.json"
+UPDATE_FLAG_FILE = ".update_available"
 
 # Colores ANSI para terminal
 class Colors:
@@ -83,12 +85,13 @@ def load_config():
         "auto_update": True,
         "deep_scan": True,
         "color_mode": True,
-        "download_path": "descargas_isrc"
+        "download_path": "descargas_isrc",
+        "ffprobe_installed": False
     }
     
     if os.path.exists(CONFIG_FILE):
         try:
-            with open(CONFIG_FILE, 'r') as f:
+            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
                 loaded_config = json.load(f)
                 config.update(loaded_config)
         except:
@@ -99,8 +102,8 @@ def load_config():
 def save_config(config):
     """Guarda la configuración en archivo"""
     try:
-        with open(CONFIG_FILE, 'w') as f:
-            json.dump(config, f, indent=4)
+        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(config, f, indent=4, ensure_ascii=False)
     except:
         pass
 
@@ -108,20 +111,11 @@ def check_dependencies():
     """Verifica e instala dependencias automáticamente"""
     missing_deps = []
     
-    try:
-        import requests
-    except ImportError:
-        missing_deps.append("requests")
-    
-    try:
-        import cloudscraper
-    except ImportError:
-        missing_deps.append("cloudscraper")
-    
-    try:
-        import mutagen
-    except ImportError:
-        missing_deps.append("mutagen")
+    for dep in ["requests", "cloudscraper", "mutagen"]:
+        try:
+            __import__(dep)
+        except ImportError:
+            missing_deps.append(dep)
     
     if missing_deps:
         print_color("⚠️  Instalando dependencias faltantes...", Colors.YELLOW)
@@ -150,37 +144,49 @@ def install_ffprobe():
     print_color("🔧 Instalando FFprobe...", Colors.YELLOW)
     
     try:
-        if IS_TERMUX:
-            subprocess.run(['pkg', 'install', 'ffmpeg', '-y'], check=True, capture_output=True)
-        elif IS_PYDROID:
-            subprocess.run(['apt', 'install', 'ffmpeg', '-y'], check=True, capture_output=True)
+        if IS_TERMUX or IS_PYDROID:
+            subprocess.run(['pkg', 'install', 'ffmpeg', '-y'], check=True, 
+                          capture_output=True, timeout=300)
         elif IS_LINUX:
             if subprocess.run(['which', 'apt-get'], capture_output=True).returncode == 0:
-                subprocess.run(['sudo', 'apt-get', 'install', 'ffmpeg', '-y'], check=True)
+                subprocess.run(['sudo', 'apt-get', 'install', 'ffmpeg', '-y'], 
+                              check=True, timeout=300)
             elif subprocess.run(['which', 'yum'], capture_output=True).returncode == 0:
-                subprocess.run(['sudo', 'yum', 'install', 'ffmpeg', '-y'], check=True)
+                subprocess.run(['sudo', 'yum', 'install', 'ffmpeg', '-y'], 
+                              check=True, timeout=300)
         elif IS_MAC:
-            subprocess.run(['brew', 'install', 'ffmpeg'], check=True)
+            subprocess.run(['brew', 'install', 'ffmpeg'], check=True, timeout=300)
+        
+        # Actualizar configuración
+        config = load_config()
+        config["ffprobe_installed"] = True
+        save_config(config)
         
         print_color("✅ FFprobe instalado correctamente", Colors.GREEN)
         return True
+    except subprocess.TimeoutExpired:
+        print_color("❌ Tiempo de espera agotado instalando FFprobe", Colors.RED)
+        return False
     except:
         print_color("❌ Error instalando FFprobe", Colors.RED)
         return False
 
-# ===== FUNCIONES DE ACTUALIZACIÓN =====
-def check_updates():
+# ===== SISTEMA DE ACTUALIZACIÓN MEJORADO =====
+def check_updates(silent=False):
     """Verifica si hay actualizaciones disponibles"""
     config = load_config()
     
     # Verificar solo una vez al día
-    if config["last_check"] == datetime.now().strftime("%Y-%m-%d"):
+    if config["last_check"] == datetime.now().strftime("%Y-%m-%d") and os.path.exists(UPDATE_FLAG_FILE):
+        if not silent:
+            print_color("✅ Ya tienes la versión más reciente", Colors.GREEN)
         return False
     
-    print_color("🔍 Buscando actualizaciones...", Colors.CYAN)
+    if not silent:
+        print_color("🔍 Buscando actualizaciones...", Colors.CYAN)
     
     try:
-        response = requests.get(REPO_URL, timeout=10)
+        response = requests.get(REPO_URL, timeout=15)
         if response.status_code == 200:
             remote_content = response.text
             
@@ -194,15 +200,24 @@ def check_updates():
             
             if local_version and remote_version:
                 if remote_version.group(1) > local_version.group(1):
-                    print_color(f"🎉 ¡Nueva versión disponible! {local_version.group(1)} → {remote_version.group(1)}", Colors.GREEN)
+                    # Guardar flag de actualización disponible
+                    with open(UPDATE_FLAG_FILE, 'w') as f:
+                        f.write(remote_version.group(1))
+                    
+                    if not silent:
+                        print_color(f"🎉 ¡Nueva versión disponible! {local_version.group(1)} → {remote_version.group(1)}", Colors.GREEN)
                     return True
+                else:
+                    # Crear archivo vacío para indicar que ya está actualizado
+                    open(UPDATE_FLAG_FILE, 'w').close()
             
         # Actualizar última verificación
         config["last_check"] = datetime.now().strftime("%Y-%m-%d")
         save_config(config)
         
-    except:
-        pass
+    except Exception as e:
+        if not silent:
+            print_color(f"❌ Error buscando actualizaciones: {e}", Colors.RED)
     
     return False
 
@@ -211,24 +226,44 @@ def update_script():
     print_color("🔄 Actualizando esVintable...", Colors.YELLOW)
     
     try:
-        response = requests.get(REPO_URL, timeout=15)
+        response = requests.get(REPO_URL, timeout=20)
         if response.status_code == 200:
+            backup_file = f"{__file__}.backup"
+            
+            # Crear backup
+            with open(backup_file, 'w', encoding='utf-8') as f:
+                with open(__file__, 'r', encoding='utf-8') as original:
+                    f.write(original.read())
+            
+            # Escribir nueva versión
             with open(__file__, 'w', encoding='utf-8') as f:
                 f.write(response.text)
+            
+            # Eliminar flag de actualización
+            if os.path.exists(UPDATE_FLAG_FILE):
+                os.remove(UPDATE_FLAG_FILE)
             
             print_color("✅ ¡Actualización completada!", Colors.GREEN)
             print_color("🔄 Reiniciando aplicación...", Colors.CYAN)
             time.sleep(2)
+            
+            # Reiniciar el script
             os.execv(sys.executable, [sys.executable] + sys.argv)
         else:
             print_color("❌ Error descargando actualización", Colors.RED)
     except Exception as e:
         print_color(f"❌ Error durante la actualización: {e}", Colors.RED)
+        # Restaurar backup si existe
+        backup_file = f"{__file__}.backup"
+        if os.path.exists(backup_file):
+            with open(backup_file, 'r', encoding='utf-8') as f:
+                with open(__file__, 'w', encoding='utf-8') as original:
+                    original.write(f.read())
+            os.remove(backup_file)
 
-# ===== FUNCIONES DE ESCANEo PROFUNDO =====
+# ===== FUNCIONES DE ESCANEO PROFUNDO =====
 def deep_scan_isrc(file_path):
     """Escaneo profundo para encontrar ISRC"""
-    methods = []
     results = []
     
     # Método 1: FFprobe (metadatos estándar)
@@ -275,7 +310,9 @@ def deep_scan_isrc(file_path):
             for match in matches:
                 if isinstance(match, bytes):
                     match = match.decode('utf-8', errors='ignore')
-                results.append(("Análisis Hexadecimal", match))
+                # Validar formato ISRC
+                if re.match(r'^[A-Z]{2}[A-Z0-9]{3}\d{5}$', match):
+                    results.append(("Análisis Hexadecimal", match))
     except:
         pass
     
@@ -305,22 +342,28 @@ def scan_directory(directory, recursive=True):
 def open_file_manager():
     """Abre el gestor de archivos según la plataforma"""
     try:
+        current_dir = os.getcwd()
+        
         if IS_TERMUX:
-            subprocess.run(['termux-open'], check=True)
-        elif IS_ANDROID:
-            # Intentar abrir gestor de archivos
-            subprocess.run(['am', 'start', '-n', 'com.android.documentsui/.DocumentsActivity'], check=True)
+            # Usar termux-open con el directorio actual
+            subprocess.run(['termux-open', current_dir], check=True, timeout=10)
+        elif IS_PYDROID:
+            # Pydroid puede usar xdg-open
+            subprocess.run(['xdg-open', current_dir], check=True, timeout=10)
         elif IS_WINDOWS:
-            os.startfile(os.getcwd())
+            os.startfile(current_dir)
         elif IS_LINUX:
-            subprocess.run(['xdg-open', '.'], check=True)
+            subprocess.run(['xdg-open', current_dir], check=True, timeout=10)
         elif IS_MAC:
-            subprocess.run(['open', '.'], check=True)
+            subprocess.run(['open', current_dir], check=True, timeout=10)
         
         print_color("📁 Gestor de archivos abierto", Colors.GREEN)
         return True
-    except:
-        print_color("❌ No se pudo abrir el gestor de archivos", Colors.RED)
+    except subprocess.TimeoutExpired:
+        print_color("⏰ Tiempo de espera agotado abriendo gestor", Colors.YELLOW)
+        return True
+    except Exception as e:
+        print_color(f"❌ No se pudo abrir el gestor de archivos: {e}", Colors.RED)
         return False
 
 def get_country_code():
@@ -341,7 +384,7 @@ def download_isrc(isrc, output_dir):
             headers = {"Authorization": f"Bearer {TOKEN}"}
             
             print_color(f"🔍 Probando {provider}...", Colors.CYAN)
-            response = scraper.get(url, headers=headers, timeout=15)
+            response = scraper.get(url, headers=headers, timeout=20)
             
             if response.status_code == 200:
                 os.makedirs(output_dir, exist_ok=True)
@@ -361,6 +404,9 @@ def download_isrc(isrc, output_dir):
 # ===== INTERFAZ DE USUARIO =====
 def show_main_menu():
     """Muestra el menú principal"""
+    # Verificar si hay actualizaciones disponibles
+    update_available = os.path.exists(UPDATE_FLAG_FILE)
+    
     menu = f"""
 {Colors.BOLD}🎵 MENÚ PRINCIPAL{Colors.END}
 {Colors.GREEN}1.{Colors.END} 🔍 Escanear archivo de audio
@@ -368,7 +414,7 @@ def show_main_menu():
 {Colors.GREEN}3.{Colors.END} 🌐 Descargar por ISRC
 {Colors.GREEN}4.{Colors.END} 📂 Abrir gestor de archivos
 {Colors.GREEN}5.{Colors.END} ⚙️  Configuración
-{Colors.GREEN}6.{Colors.END} 🔄 Verificar actualizaciones
+{Colors.GREEN}6.{Colors.END} 🔄 {'¡ACTUALIZAR!' if update_available else 'Verificar actualizaciones'}
 {Colors.GREEN}7.{Colors.END} ❌ Salir
 """
     print(menu)
@@ -468,9 +514,11 @@ def settings_menu():
         print(f"2. Escaneo profundo: {'✅' if config['deep_scan'] else '❌'}")
         print(f"3. Modo color: {'✅' if config['color_mode'] else '❌'}")
         print(f"4. Carpeta descargas: {config['download_path']}")
-        print("5. Volver al menú principal")
+        print(f"5. FFprobe instalado: {'✅' if config.get('ffprobe_installed', False) else '❌'}")
+        print("6. Instalar FFprobe")
+        print("7. Volver al menú principal")
         
-        choice = input("Selecciona opción (1-5): ").strip()
+        choice = input("Selecciona opción (1-7): ").strip()
         
         if choice == "1":
             config['auto_update'] = not config['auto_update']
@@ -483,7 +531,15 @@ def settings_menu():
             if new_path:
                 config['download_path'] = new_path
         elif choice == "5":
+            # Solo mostrar estado
+            pass
+        elif choice == "6":
+            if install_ffprobe():
+                config['ffprobe_installed'] = True
+        elif choice == "7":
             break
+        else:
+            print_color("❌ Opción inválida", Colors.RED)
         
         save_config(config)
         print_color("✅ Configuración guardada", Colors.GREEN)
@@ -496,19 +552,19 @@ def main():
         print_color("❌ Error con las dependencias", Colors.RED)
         return
     
-    # Verificar actualizaciones
+    # Verificar actualizaciones al inicio
     config = load_config()
-    if config["auto_update"] and check_updates():
-        update = input("¿Actualizar ahora? (s/n): ").lower()
-        if update == 's':
-            update_script()
-            return
+    if config["auto_update"] and check_updates(silent=True):
+        print_color("🎉 ¡Actualización disponible! Usa la opción 6 para actualizar.", Colors.GREEN)
     
-    # Instalar FFprobe si no está disponible
-    if not check_ffprobe():
-        install = input("FFprobe no está instalado. ¿Instalarlo? (s/n): ").lower()
+    # Verificar e instalar FFprobe si es necesario
+    if not check_ffprobe() and not config.get("ffprobe_installed", False):
+        print_color("🔍 FFprobe no detectado", Colors.YELLOW)
+        install = input("¿Instalar FFprobe? (s/n): ").lower()
         if install == 's':
-            install_ffprobe()
+            if install_ffprobe():
+                config['ffprobe_installed'] = True
+                save_config(config)
     
     # Bucle principal
     while True:
@@ -528,10 +584,17 @@ def main():
         elif choice == "5":
             settings_menu()
         elif choice == "6":
-            if check_updates():
-                update_script()
+            if os.path.exists(UPDATE_FLAG_FILE):
+                update = input("¿Actualizar ahora? (s/n): ").lower()
+                if update == 's':
+                    update_script()
+                    return
             else:
-                print_color("✅ Ya tienes la versión más reciente", Colors.GREEN)
+                if check_updates():
+                    update = input("¿Actualizar ahora? (s/n): ").lower()
+                    if update == 's':
+                        update_script()
+                        return
         elif choice == "7":
             print_color("👋 ¡Hasta pronto!", Colors.CYAN)
             break
