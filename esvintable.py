@@ -21,7 +21,7 @@ from threading import Thread, Event
 import cloudscraper
 
 # ===== CONFIGURACIÓN GLOBAL =====
-VERSION = "4.5"
+VERSION = "6.0"
 REPO_RAW_URL = "https://raw.githubusercontent.com/JesusQuijada34/esvintable/main/"
 SCRIPT_FILENAME = "esvintable.py"
 DETAILS_XML_URL = f"{REPO_RAW_URL}details.xml"
