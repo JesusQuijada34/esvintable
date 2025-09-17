@@ -15,7 +15,7 @@ import requests
 import hashlib
 
 # ===== CONFIGURACIÓN GLOBAL =====
-VERSION = "4.1"
+VERSION = "4.2"
 REPO_RAW_URL = "https://raw.githubusercontent.com/JesusQuijada34/esvintable/main/esvintable.py"
 SUPPORTED_AUDIO = ('.mp3', '.flac', '.wav', '.m4a', '.aac', '.ogg')
 
