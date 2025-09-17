@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 # esVintable Ultimate PRO - Multiplataforma
 # Autor: @JesusQuijada34 | GitHub.com/JesusQuijada34/esvintable
-# Última actualización: 2025-09-17
 
 import os
 import sys
@@ -21,11 +20,11 @@ from threading import Thread, Event
 import cloudscraper
 
 # ===== CONFIGURACIÓN GLOBAL =====
-# Versión inicial - será actualizada desde XML
-VERSION = "4.5"
+# NOTA: La versión ahora se obtiene desde el XML
 REPO_RAW_URL = "https://raw.githubusercontent.com/JesusQuijada34/esvintable/main/"
 SCRIPT_FILENAME = "esvintable.py"
 DETAILS_XML_URL = f"{REPO_RAW_URL}details.xml"
+LOCAL_XML_FILE = "esvintable_details.xml"
 UPDATE_INTERVAL = 60  # Segundos entre verificaciones de actualización
 CONFIG_FILE = "esvintable_config.json"
 
@@ -88,10 +87,31 @@ class UpdateChecker:
         self.update_event = Event()
         self.running = True
         self.remote_version = None
+        self.local_version = None
         self.update_info = {}
         
+        # Cargar versión local desde XML
+        self.load_local_version()
+        
+    def load_local_version(self):
+        """Carga la versión desde el XML local"""
+        try:
+            if os.path.exists(LOCAL_XML_FILE):
+                tree = ET.parse(LOCAL_XML_FILE)
+                root = tree.getroot()
+                version_element = root.find('version')
+                if version_element is not None:
+                    self.local_version = version_element.text.strip()
+                    return True
+        except Exception as e:
+            print(color(f"❌ Error leyendo XML local: {e}", Colors.RED))
+        
+        # Si no hay XML local, usar versión por defecto
+        self.local_version = "0.0"
+        return False
+    
     def get_remote_info_from_xml(self):
-        """Obtiene información completa desde el archivo XML"""
+        """Obtiene información completa desde el archivo XML remoto"""
         try:
             response = requests.get(DETAILS_XML_URL, timeout=10)
             if response.status_code == 200:
@@ -99,41 +119,54 @@ class UpdateChecker:
                 
                 # Extraer información del XML
                 info = {}
-                info['version'] = root.find('version').text.strip() if root.find('version') is not None else VERSION
+                info['version'] = root.find('version').text.strip() if root.find('version') is not None else self.local_version
                 info['changelog'] = root.find('changelog').text.strip() if root.find('changelog') is not None else ""
                 info['release_date'] = root.find('release_date').text.strip() if root.find('release_date') is not None else ""
                 info['critical'] = root.find('critical').text.strip().lower() == 'true' if root.find('critical') is not None else False
                 
                 return info
         except Exception as e:
-            print(color(f"❌ Error leyendo XML: {e}", Colors.RED))
+            print(color(f"❌ Error leyendo XML remoto: {e}", Colors.RED))
         return None
     
-    def compare_versions(self, local_ver, remote_ver):
-        """Compara versiones en formato vX-XX.XX-XX.XX-XXXXXXX"""
+    def download_xml_update(self):
+        """Descarga la última versión del XML"""
         try:
-            # Extraer partes numéricas de las versiones
-            local_parts = re.findall(r'\d+', local_ver)
-            remote_parts = re.findall(r'\d+', remote_ver)
+            response = requests.get(DETAILS_XML_URL, timeout=10)
+            if response.status_code == 200:
+                with open(LOCAL_XML_FILE, 'wb') as f:
+                    f.write(response.content)
+                print(color("✅ XML actualizado correctamente", Colors.GREEN))
+                return True
+        except Exception as e:
+            print(color(f"❌ Error descargando XML: {e}", Colors.RED))
+        return False
+    
+    def compare_versions(self, local_ver, remote_ver):
+        """Compara versiones en formato semántico (X.Y.Z)"""
+        try:
+            # Convertir versiones a tuplas numéricas para comparación
+            local_parts = tuple(map(int, local_ver.split('.')))
+            remote_parts = tuple(map(int, remote_ver.split('.')))
             
-            # Comparar cada parte numérica
-            for i in range(min(len(local_parts), len(remote_parts))):
-                if int(remote_parts[i]) > int(local_parts[i]):
-                    return True
-                elif int(remote_parts[i]) < int(local_parts[i]):
-                    return False
-            # Si todas las partes son iguales, la más larga es más nueva
-            return len(remote_parts) > len(local_parts)
+            # Comparar cada parte (major, minor, patch)
+            return remote_parts > local_parts
         except:
+            # Fallback: comparación lexicográfica
             return remote_ver > local_ver
     
     def check_for_updates(self):
-        """Verifica si hay actualizaciones disponibles"""
+        """Verifica si hay actualizaciones disponibles comparando XML local y remoto"""
         try:
             self.update_info = self.get_remote_info_from_xml()
             if self.update_info and 'version' in self.update_info:
                 self.remote_version = self.update_info['version']
-                if self.compare_versions(VERSION, self.remote_version):
+                
+                # Actualizar XML local si la versión remota es más reciente
+                if self.compare_versions(self.local_version, self.remote_version):
+                    if self.download_xml_update():
+                        self.local_version = self.remote_version
+                    
                     self.update_available = True
                     self.new_version = self.remote_version
                     return True
@@ -141,8 +174,8 @@ class UpdateChecker:
             print(color(f"❌ Error verificando actualizaciones: {e}", Colors.RED))
         return False
     
-    def download_update(self):
-        """Descarga la actualización desde el repo"""
+    def download_script_update(self):
+        """Descarga la actualización del script desde el repo"""
         try:
             script_url = f"{REPO_RAW_URL}{SCRIPT_FILENAME}"
             response = requests.get(script_url, timeout=20)
@@ -171,7 +204,7 @@ class UpdateChecker:
                     current_time = datetime.now()
                     if (current_time - self.last_check).total_seconds() >= UPDATE_INTERVAL:
                         if self.check_for_updates():
-                            print(color(f"\n🎉 ¡Nueva versión disponible! v{VERSION} → v{self.new_version}", Colors.GREEN))
+                            print(color(f"\n🎉 ¡Nueva versión disponible! v{self.local_version} → v{self.new_version}", Colors.GREEN))
                             if self.update_info.get('critical', False):
                                 print(color("🚨 ACTUALIZACIÓN CRÍTICA: Se recomienda actualizar inmediatamente", Colors.RED))
                         self.last_check = current_time
@@ -263,15 +296,16 @@ def install_ffmpeg_tools():
         print(color("❌ Error instalando FFmpeg", Colors.RED))
         return False
 
-# ===== NAVEGADOR DE ARCHIVOS =====
-def file_browser(start_path="."):
-    """Navegador interactivo de archivos"""
+# ===== EXPLORADOR DE ARCHIVOS AVANZADO =====
+def advanced_file_browser(start_path="."):
+    """Navegador interactivo de archivos con vista previa de metadatos"""
     current_path = os.path.abspath(start_path)
+    selected_file = None
     
     while True:
         clear()
         print(color(f"📁 Navegando: {current_path}", Colors.BLUE))
-        print(color("=" * 60, Colors.CYAN))
+        print(color("=" * 80, Colors.CYAN))
         
         # Obtener contenido del directorio
         try:
@@ -311,11 +345,19 @@ def file_browser(start_path="."):
             for i, file_name in enumerate(other_files, 1 + len(directories) + len(audio_files)):
                 print(color(f"  {i:2d}. {file_name}", Colors.WHITE))
         
-        print(color("\n" + "=" * 60, Colors.CYAN))
+        # Mostrar información del archivo seleccionado
+        if selected_file:
+            print(color("\n" + "=" * 80, Colors.CYAN))
+            print(color("📋 METADATOS DEL ARCHIVO SELECCIONADO:", Colors.BOLD))
+            info = extract_isrc_advanced(selected_file)
+            display_audio_info(info)
+        
+        print(color("\n" + "=" * 80, Colors.CYAN))
         print("0. Volver al directorio anterior")
         print("00. Seleccionar este directorio para buscar")
-        print("000. Seleccionar archivo de audio para analizar")
-        print("0000. Volver al menú principal")
+        print("000. Extraer ISRC del archivo seleccionado")
+        print("0000. Analizar archivo en profundidad")
+        print("00000. Volver al menú principal")
         
         try:
             choice = input("\nSelecciona una opción: ").strip()
@@ -323,27 +365,37 @@ def file_browser(start_path="."):
             if choice == "0":
                 # Volver al directorio anterior
                 current_path = os.path.dirname(current_path)
+                selected_file = None
             elif choice == "00":
                 # Seleccionar este directorio para buscar
                 return current_path
-            elif choice == "000":
-                # Seleccionar archivo de audio para analizar
-                file_choice = input("Introduce el número del archivo: ").strip()
-                if file_choice.isdigit():
-                    idx = int(file_choice) - 1
-                    if 0 <= idx < len(audio_files):
-                        return os.path.join(current_path, audio_files[idx])
-                    else:
-                        print(color("❌ Número de archivo inválido", Colors.RED))
-                        time.sleep(1)
-            elif choice == "0000":
+            elif choice == "000" and selected_file:
+                # Extraer ISRC del archivo seleccionado
+                info = extract_isrc_advanced(selected_file)
+                if info['isrc']:
+                    print(color(f"✅ ISRC encontrado: {info['isrc']}", Colors.GREEN))
+                    if input("¿Descargar versión de alta calidad? (s/n): ").lower() == 's':
+                        download_by_isrc(info['isrc'], os.path.dirname(selected_file))
+                else:
+                    print(color("❌ No se encontró ISRC en este archivo", Colors.RED))
+                input("\n⏎ Enter para continuar...")
+            elif choice == "0000" and selected_file:
+                # Analizar archivo en profundidad
+                print(color("🔍 Analizando archivo en profundidad...", Colors.YELLOW))
+                info = extract_isrc_advanced(selected_file, deep_scan=True)
+                display_audio_info(info, detailed=True)
+                input("\n⏎ Enter para continuar...")
+            elif choice == "00000":
                 # Volver al menú principal
                 return None
             elif choice.isdigit():
-                # Navegar a un directorio
+                # Navegar a un directorio o seleccionar archivo
                 idx = int(choice) - 1
                 if 0 <= idx < len(directories):
                     current_path = os.path.join(current_path, directories[idx])
+                    selected_file = None
+                elif len(directories) <= idx < len(directories) + len(audio_files):
+                    selected_file = os.path.join(current_path, audio_files[idx - len(directories)])
                 else:
                     print(color("❌ Opción inválida", Colors.RED))
                     time.sleep(1)
@@ -354,9 +406,9 @@ def file_browser(start_path="."):
         except KeyboardInterrupt:
             return None
 
-# ===== ESCANEO PROFUNDO DE AUDIO =====
-def deep_scan_audio(file_path):
-    """Escaneo multiplataforma y robusto de metadatos"""
+# ===== MÉTODOS AVANZADOS DE EXTRACCIÓN ISRC =====
+def extract_isrc_advanced(file_path, deep_scan=False):
+    """Extrae ISRC usando múltiples métodos avanzados"""
     result = {
         'file': file_path, 
         'isrc': None, 
@@ -366,7 +418,9 @@ def deep_scan_audio(file_path):
         'duration': None, 
         'bitrate': None,
         'size': os.path.getsize(file_path) if os.path.exists(file_path) else 0,
-        'tags': {}
+        'tags': {},
+        'method': None,
+        'hex_data': None
     }
     
     # Método 1: FFprobe (metadatos estándar)
@@ -380,7 +434,15 @@ def deep_scan_audio(file_path):
                 info = json.loads(proc.stdout)
                 tags = info.get('format', {}).get('tags', {})
                 result['tags'] = tags
-                result['isrc'] = tags.get('ISRC') or tags.get('TSRC') or tags.get('isrc')
+                
+                # Buscar ISRC en diferentes campos de metadatos
+                isrc_fields = ['ISRC', 'TSRC', 'isrc', 'ISRC_code', 'ISRC_Code']
+                for field in isrc_fields:
+                    if field in tags:
+                        result['isrc'] = tags[field]
+                        result['method'] = f"FFprobe ({field})"
+                        break
+                
                 result['title'] = tags.get('title') or tags.get('TITLE')
                 result['artist'] = tags.get('artist') or tags.get('ARTIST') or tags.get('composer')
                 result['album'] = tags.get('album') or tags.get('ALBUM')
@@ -389,32 +451,100 @@ def deep_scan_audio(file_path):
         except Exception:
             pass
     
-    # Método 2: Análisis hexadecimal (búsqueda profunda de ISRC)
-    try:
-        with open(file_path, 'rb') as f:
-            content = f.read(1000000)  # Leer primeros MB
-            
-            # Patrones comunes de ISRC
-            patterns = [
-                br'ISRC[=:]([A-Z]{2}[A-Z0-9]{3}\d{5})',
-                br'([A-Z]{2}[A-Z0-9]{3}\d{5})',
-                br'isrc[=:]([A-Z]{2}[A-Z0-9]{3}\d{5})'
-            ]
-            
-            for pattern in patterns:
-                match = re.search(pattern, content, re.IGNORECASE)
-                if match:
-                    found_isrc = match.group(1)
-                    if isinstance(found_isrc, bytes):
-                        found_isrc = found_isrc.decode('utf-8', errors='ignore')
-                    # Validar formato ISRC
-                    if re.match(r'^[A-Z]{2}[A-Z0-9]{3}\d{5}$', found_isrc):
-                        result['isrc'] = found_isrc
-                        break
-    except Exception:
-        pass
+    # Si no encontramos ISRC o queremos un escaneo profundo
+    if deep_scan or not result['isrc']:
+        # Método 2: Análisis hexadecimal (búsqueda profunda de ISRC)
+        try:
+            with open(file_path, 'rb') as f:
+                # Leer diferentes partes del archivo donde suele estar el ISRC
+                chunks = []
+                
+                # Primeros 1MB (metadatos)
+                chunks.append(f.read(1000000))
+                
+                # Últimos 500KB (metadatos al final en algunos formatos)
+                f.seek(-500000, 2)
+                chunks.append(f.read(500000))
+                
+                # Medio del archivo (para algunos formatos especiales)
+                file_size = os.path.getsize(file_path)
+                if file_size > 2000000:
+                    f.seek(file_size // 2)
+                    chunks.append(f.read(100000))
+                
+                content = b''.join(chunks)
+                result['hex_data'] = content.hex()[:200] + "..."  # Solo una muestra
+                
+                # Patrones comunes de ISRC
+                patterns = [
+                    br'ISRC[=:]([A-Z]{2}[A-Z0-9]{3}\d{5})',
+                    br'([A-Z]{2}[A-Z0-9]{3}\d{5})',
+                    br'isrc[=:]([A-Z]{2}[A-Z0-9]{3}\d{5})',
+                    br'ISRC\s*[:=]\s*([A-Z]{2}[A-Z0-9]{3}\d{5})',
+                    br'Z\d{3}\d{5}',  # Algunos formatos alternativos
+                ]
+                
+                for i, pattern in enumerate(patterns):
+                    match = re.search(pattern, content, re.IGNORECASE)
+                    if match:
+                        found_isrc = match.group(1) if match.lastindex else match.group(0)
+                        if isinstance(found_isrc, bytes):
+                            found_isrc = found_isrc.decode('utf-8', errors='ignore')
+                        # Validar formato ISRC
+                        if re.match(r'^[A-Z]{2}[A-Z0-9]{3}\d{5}$', found_isrc):
+                            result['isrc'] = found_isrc
+                            result['method'] = f"Hex Pattern {i+1}"
+                            break
+        except Exception as e:
+            result['error'] = str(e)
+    
+    # Método 3: Búsqueda en strings del archivo
+    if deep_scan and not result['isrc']:
+        try:
+            with open(file_path, 'rb') as f:
+                content = f.read(500000)  # Leer primeros 500KB
+                # Buscar strings legibles
+                strings = re.findall(b'[A-Za-z0-9=:]{10,50}', content)
+                for s in strings:
+                    try:
+                        decoded = s.decode('utf-8', errors='ignore')
+                        isrc_match = re.search(r'[A-Z]{2}[A-Z0-9]{3}\d{5}', decoded)
+                        if isrc_match:
+                            result['isrc'] = isrc_match.group(0)
+                            result['method'] = "String extraction"
+                            break
+                    except:
+                        continue
+        except Exception:
+            pass
     
     return result
+
+def display_audio_info(info, detailed=False):
+    """Muestra información del audio de forma atractiva"""
+    print(color(f"📁 Archivo: {info['file']}", Colors.BLUE))
+    print(f"   🎵 {color('Título:', Colors.BOLD)} {info.get('title', 'Desconocido')}")
+    print(f"   🎤 {color('Artista:', Colors.BOLD)} {info.get('artist', 'Desconocido')}")
+    print(f"   💿 {color('Álbum:', Colors.BOLD)} {info.get('album', 'Desconocido')}")
+    print(f"   🏷️  {color('ISRC:', Colors.BOLD)} {color(info.get('isrc', 'No encontrado'), Colors.CYAN if info.get('isrc') else Colors.RED)}")
+    
+    if info.get('method'):
+        print(f"   🔍 {color('Método:', Colors.BOLD)} {info['method']}")
+    
+    if detailed:
+        print(f"   ⏱️  {color('Duración:', Colors.BOLD)} {int(info['duration']) if info.get('duration') else '-'}s")
+        print(f"   📊 {color('Bitrate:', Colors.BOLD)} {info.get('bitrate', '-')} kbps")
+        print(f"   📦 {color('Tamaño:', Colors.BOLD)} {info['size'] // 1024} KB")
+        
+        if info.get('hex_data'):
+            print(f"   🔢 {color('Hex Sample:', Colors.BOLD)} {info['hex_data']}")
+        
+        if info.get('tags'):
+            print(f"   🏷️  {color('Etiquetas:', Colors.BOLD)}")
+            for k, v in list(info['tags'].items())[:5]:  # Mostrar solo las primeras 5
+                print(f"        {k}: {v}")
+            if len(info['tags']) > 5:
+                print(f"        ... y {len(info['tags']) - 5} más")
 
 # ===== BÚSQUEDA Y DESCARGA POR ISRC =====
 def download_by_isrc(isrc, output_dir="descargas_isrc"):
@@ -433,7 +563,7 @@ def download_by_isrc(isrc, output_dir="descargas_isrc"):
             
             if response.status_code == 200:
                 os.makedirs(output_dir, exist_ok=True)
-                filename = os.path.join(output_dir, f"{isrc}.m4a")
+                filename = os.path.join(output_dir, f"{isrc}_{provider}.m4a")
                 
                 with open(filename, 'wb') as f:
                     f.write(response.content)
@@ -472,7 +602,7 @@ def search_isrc_in_directory(directory, isrc_code):
     total = len(audio_files)
     for i, file_path in enumerate(audio_files, 1):
         print(color(f"   Escaneando {i}/{total}: {os.path.basename(file_path)[:30]}...", Colors.YELLOW), end="\r")
-        audio_info = deep_scan_audio(file_path)
+        audio_info = extract_isrc_advanced(file_path)
         if audio_info['isrc'] and audio_info['isrc'].upper() == isrc_code.upper():
             found_files.append(audio_info)
     
@@ -513,7 +643,7 @@ def filter_songs(directory, filters):
     total = len(audio_files)
     for i, path in enumerate(audio_files, 1):
         print(color(f"   Escaneando {i}/{total}: {os.path.basename(path)[:30]}...", Colors.YELLOW), end="\r")
-        info = deep_scan_audio(path)
+        info = extract_isrc_advanced(path)
         match = True
         for k, v in filters.items():
             if v and (str(info.get(k, '')).lower().find(v.lower()) == -1):
@@ -524,16 +654,6 @@ def filter_songs(directory, filters):
     
     print()  # Nueva línea después de la barra de progreso
     return results
-
-def show_song(song):
-    print(color(f"📁 Archivo: {song['file']}", Colors.BLUE))
-    print(f"   🎵 {color('Título:', Colors.BOLD)} {song.get('title', 'Desconocido')}")
-    print(f"   🎤 {color('Artista:', Colors.BOLD)} {song.get('artist', 'Desconocido')}")
-    print(f"   💿 {color('Álbum:', Colors.BOLD)} {song.get('album', 'Desconocido')}")
-    print(f"   🏷️  {color('ISRC:', Colors.BOLD)} {color(song.get('isrc', 'No encontrado'), Colors.CYAN if song.get('isrc') else Colors.RED)}")
-    print(f"   ⏱️  {color('Duración:', Colors.BOLD)} {int(song['duration']) if song['duration'] else '-'}s")
-    print(f"   📊 {color('Bitrate:', Colors.BOLD)} {song.get('bitrate', '-')} kbps")
-    print(f"   📦 {color('Tamaño:', Colors.BOLD)} {song['size'] // 1024} KB\n")
 
 # ===== REPRODUCCIÓN =====
 def play_song(file_path):
@@ -561,9 +681,9 @@ def play_song(file_path):
 def print_banner():
     # Verificar actualizaciones al inicio
     if updater.check_for_updates():
-        version_info = color(f"v{VERSION} → v{updater.new_version}", Colors.GREEN)
+        version_info = color(f"v{updater.local_version} → v{updater.new_version}", Colors.GREEN)
     else:
-        version_info = color(f"v{VERSION} (Actualizado)", Colors.GREEN)
+        version_info = color(f"v{updater.local_version} (Actualizado)", Colors.GREEN)
     
     banner = f"""{Colors.CYAN}{Colors.BOLD}
 ╔══════════════════════════════════════════════════════════════╗
@@ -588,7 +708,7 @@ def print_guide():
     print("3. 📥 Descargar canciones por código ISRC")
     print("4. 🎧 Reproducir archivos de audio")
     print("5. 🌐 Búsqueda en servicios de música")
-    print("6. 📁 Navegador de archivos")
+    print("6. 📁 Navegador de archivos avanzado")
     print("7. 🔄 Verificar actualizaciones")
     print("8. ⚙️  Instalar herramientas")
     print("9. ❌ Salir\n")
@@ -604,7 +724,7 @@ def main_menu():
         "📥 Descargar por ISRC",
         "🎧 Reproducir canción",
         "🌐 Buscar en servicios de música",
-        "📁 Navegador de archivos",
+        "📁 Navegador de archivos avanzado",
         "🔄 Verificar actualizaciones",
         "⚙️ Instalar herramientas",
         "❌ Salir"
@@ -630,7 +750,7 @@ def search_by_metadata_menu():
     
     # Usar navegador de archivos para seleccionar directorio
     print("\nSelecciona el directorio a buscar:")
-    directory = file_browser()
+    directory = advanced_file_browser()
     if directory is None:
         return
     
@@ -646,7 +766,7 @@ def search_by_metadata_menu():
         print(color(f"\n🎶 Se encontraron {len(found)} canciones:", Colors.GREEN))
         for i, song in enumerate(found, 1):
             print(color(f"{i}.", Colors.WHITE))
-            show_song(song)
+            display_audio_info(song)
         
         # Opción para reproducir
         play = input("¿Reproducir alguna? Número o Enter para omitir: ").strip()
@@ -669,7 +789,7 @@ def search_by_isrc_menu():
     
     # Usar navegador de archivos para seleccionar directorio
     print("\nSelecciona el directorio a buscar:")
-    directory = file_browser()
+    directory = advanced_file_browser()
     if directory is None:
         return
     
@@ -685,7 +805,7 @@ def search_by_isrc_menu():
         print(color(f"\n✅ Se encontraron {len(found)} archivos con ISRC {isrc_code}:", Colors.GREEN))
         for i, song in enumerate(found, 1):
             print(color(f"{i}.", Colors.WHITE))
-            show_song(song)
+            display_audio_info(song)
         
         # Opción para reproducir
         play = input("¿Reproducir alguna? Número o Enter para omitir: ").strip()
@@ -708,7 +828,7 @@ def download_by_isrc_menu():
     
     # Usar navegador de archivos para seleccionar directorio de descarga
     print("\nSelecciona el directorio de descarga:")
-    output_dir = file_browser()
+    output_dir = advanced_file_browser()
     if output_dir is None:
         output_dir = "descargas_isrc"
     
@@ -731,7 +851,7 @@ def play_song_menu():
     
     # Usar navegador de archivos para seleccionar archivo
     print("Selecciona el archivo de audio:")
-    path = file_browser()
+    path = advanced_file_browser()
     if path is None or not os.path.isfile(path):
         print(color("❌ Archivo no válido.", Colors.RED))
         time.sleep(2)
@@ -744,8 +864,8 @@ def play_song_menu():
     
     # Mostrar metadatos antes de reproducir
     print(color("\n📋 Metadatos del archivo:", Colors.CYAN))
-    info = deep_scan_audio(path)
-    show_song(info)
+    info = extract_isrc_advanced(path)
+    display_audio_info(info)
     
     play_song(path)
     input("\n⏎ Enter para continuar...")
@@ -777,15 +897,15 @@ def external_search_menu():
 
 def file_browser_menu():
     clear()
-    print(color("📁 Navegador de Archivos", Colors.BOLD))
+    print(color("📁 Navegador de Archivos Avanzado", Colors.BOLD))
     
-    selected = file_browser()
+    selected = advanced_file_browser()
     if selected:
         if os.path.isfile(selected):
             print(color(f"\n📄 Archivo seleccionado: {selected}", Colors.GREEN))
             # Mostrar metadatos
-            info = deep_scan_audio(selected)
-            show_song(info)
+            info = extract_isrc_advanced(selected, deep_scan=True)
+            display_audio_info(info, detailed=True)
             
             # Opciones para archivos de audio
             if selected.lower().endswith(SUPPORTED_AUDIO):
@@ -802,7 +922,7 @@ def update_menu():
     print(color("🔄 Sistema de Actualizaciones", Colors.BOLD))
     
     if updater.check_for_updates():
-        print(color(f"🎉 ¡Nueva versión disponible! v{VERSION} → v{updater.new_version}", Colors.GREEN))
+        print(color(f"🎉 ¡Nueva versión disponible! v{updater.local_version} → v{updater.new_version}", Colors.GREEN))
         print(color(f"📅 Fecha de lanzamiento: {updater.update_info.get('release_date', 'Desconocida')}", Colors.CYAN))
         print(color(f"📋 Cambios:\n{updater.update_info.get('changelog', 'No disponible')}", Colors.WHITE))
         
@@ -812,7 +932,7 @@ def update_menu():
         confirm = input("\n¿Actualizar ahora? (s/n): ").lower()
         if confirm == 's':
             print(color("⏳ Descargando actualización...", Colors.YELLOW))
-            if updater.download_update():
+            if updater.download_script_update():
                 print(color("✅ ¡Actualización completada!", Colors.GREEN))
                 print(color("🔄 Reiniciando aplicación...", Colors.CYAN))
                 time.sleep(2)
