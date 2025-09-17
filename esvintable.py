@@ -18,14 +18,18 @@ from pathlib import Path
 from urllib.parse import urlparse
 from threading import Thread, Event
 import cloudscraper
+import mutagen
+from mutagen.id3 import ID3, error as ID3error
+from mutagen.easyid3 import EasyID3
+from mutagen.flac import FLAC
+from mutagen.mp4 import MP4
 
 # ===== CONFIGURACIÓN GLOBAL =====
-# NOTA: La versión ahora se obtiene desde el XML
 REPO_RAW_URL = "https://raw.githubusercontent.com/JesusQuijada34/esvintable/main/"
 SCRIPT_FILENAME = "esvintable.py"
 DETAILS_XML_URL = f"{REPO_RAW_URL}details.xml"
 LOCAL_XML_FILE = "esvintable_details.xml"
-UPDATE_INTERVAL = 60  # Segundos entre verificaciones de actualización
+UPDATE_INTERVAL = 60
 CONFIG_FILE = "esvintable_config.json"
 
 # Proveedores de música para búsqueda ISRC
@@ -66,11 +70,12 @@ class Colors:
     BOLD = '\033[1m'
     UNDERLINE = '\033[4m'
     END = '\033[0m'
-    # Colores adicionales para mejor experiencia
     ORANGE = '\033[38;5;208m'
     PURPLE = '\033[38;5;129m'
     PINK = '\033[38;5;199m'
     LIGHT_BLUE = '\033[38;5;45m'
+    LIGHT_GREEN = '\033[38;5;120m'
+    GRAY = '\033[38;5;245m'
 
 def color(text, color_code):
     return f"{color_code}{text}{Colors.END}"
@@ -208,9 +213,9 @@ class UpdateChecker:
                             if self.update_info.get('critical', False):
                                 print(color("🚨 ACTUALIZACIÓN CRÍTICA: Se recomienda actualizar inmediatamente", Colors.RED))
                         self.last_check = current_time
-                    time.sleep(10)  # Verificar cada 10 segundos
+                    time.sleep(10)
                 except Exception:
-                    time.sleep(30)  # Esperar más en caso de error
+                    time.sleep(30)
         
         Thread(target=checker_thread, daemon=True).start()
     
@@ -226,7 +231,7 @@ def check_dependencies():
     """Verifica e instala dependencias automáticamente"""
     missing_deps = []
     
-    for dep in ["requests", "cloudscraper"]:
+    for dep in ["requests", "cloudscraper", "mutagen"]:
         try:
             __import__(dep)
         except ImportError:
@@ -296,6 +301,369 @@ def install_ffmpeg_tools():
         print(color("❌ Error instalando FFmpeg", Colors.RED))
         return False
 
+# ===== MÉTODOS AVANZADOS DE EXTRACCIÓN DE METADATOS =====
+def extract_isrc_advanced(file_path, deep_scan=False):
+    """Extrae ISRC y metadatos usando múltiples métodos avanzados"""
+    result = {
+        'file': file_path, 
+        'filename': os.path.basename(file_path),
+        'isrc': None, 
+        'artist': None, 
+        'album': None, 
+        'title': None, 
+        'duration': None, 
+        'bitrate': None,
+        'sample_rate': None,
+        'channels': None,
+        'size': os.path.getsize(file_path) if os.path.exists(file_path) else 0,
+        'tags': {},
+        'method': None,
+        'hex_data': None,
+        'file_type': os.path.splitext(file_path)[1].lower(),
+        'has_cover': False,
+        'year': None,
+        'genre': None,
+        'track_number': None,
+        'composer': None,
+        'publisher': None,
+        'isrc_found': False,
+        'quality_rating': 0  # Calidad de metadatos (0-100)
+    }
+    
+    # Método 1: Usar mutagen para metadatos específicos del formato
+    try:
+        audiofile = None
+        if file_path.lower().endswith('.mp3'):
+            try:
+                audiofile = EasyID3(file_path)
+            except ID3error:
+                audiofile = None
+                
+            # Intentar con ID3 estándar si EasyID3 falla
+            if audiofile is None:
+                try:
+                    audiofile = ID3(file_path)
+                except:
+                    audiofile = None
+                    
+        elif file_path.lower().endswith('.flac'):
+            audiofile = FLAC(file_path)
+        elif file_path.lower().endswith(('.m4a', '.mp4')):
+            audiofile = MP4(file_path)
+        
+        if audiofile:
+            # Extraer metadatos comunes
+            tags_to_extract = {
+                'artist': ['artist', 'performer', '©ART'],
+                'title': ['title', '©nam'],
+                'album': ['album', '©alb'],
+                'isrc': ['isrc', 'TSRC'],
+                'date': ['date', 'year', '©day'],
+                'genre': ['genre', '©gen'],
+                'tracknumber': ['tracknumber', 'trck', '©trk'],
+                'composer': ['composer', '©wrt'],
+                'publisher': ['publisher', '©pub']
+            }
+            
+            for field, tags in tags_to_extract.items():
+                for tag in tags:
+                    try:
+                        if tag in audiofile:
+                            value = audiofile[tag]
+                            if isinstance(value, list):
+                                value = value[0]
+                            result[field] = str(value)
+                            break
+                    except:
+                        continue
+            
+            # Verificar si tiene imagen de portada
+            if hasattr(audiofile, 'pictures') and audiofile.pictures:
+                result['has_cover'] = True
+            elif file_path.lower().endswith('.mp3'):
+                try:
+                    id3 = ID3(file_path)
+                    for key in id3.keys():
+                        if 'APIC' in key:
+                            result['has_cover'] = True
+                            break
+                except:
+                    pass
+                    
+    except Exception as e:
+        result['error'] = f"Mutagen error: {str(e)}"
+    
+    # Método 2: FFprobe para información técnica
+    if check_ffprobe():
+        try:
+            proc = subprocess.run(
+                ['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_format', '-show_streams', file_path],
+                capture_output=True, text=True, timeout=15
+            )
+            if proc.returncode == 0:
+                info = json.loads(proc.stdout)
+                
+                # Información de formato
+                if 'format' in info:
+                    format_info = info['format']
+                    result['duration'] = float(format_info.get('duration', 0))
+                    result['bitrate'] = int(format_info.get('bit_rate', 0)) // 1000 if format_info.get('bit_rate') else None
+                    
+                    # Tags de formato
+                    if 'tags' in format_info:
+                        format_tags = format_info['tags']
+                        result['tags'].update(format_tags)
+                        
+                        # Buscar ISRC en tags de formato
+                        isrc_fields = ['ISRC', 'TSRC', 'isrc', 'ISRC_code', 'ISRC_Code']
+                        for field in isrc_fields:
+                            if field in format_tags and not result['isrc']:
+                                result['isrc'] = format_tags[field]
+                                result['method'] = f"FFprobe format ({field})"
+                                break
+                
+                # Información de streams (generalmente el primero es audio)
+                if 'streams' in info and len(info['streams']) > 0:
+                    stream_info = info['streams'][0]
+                    result['sample_rate'] = stream_info.get('sample_rate')
+                    result['channels'] = stream_info.get('channels')
+                    
+                    # Tags de stream
+                    if 'tags' in stream_info:
+                        stream_tags = stream_info['tags']
+                        result['tags'].update(stream_tags)
+                        
+                        # Buscar ISRC en tags de stream
+                        isrc_fields = ['ISRC', 'TSRC', 'isrc', 'ISRC_code', 'ISRC_Code']
+                        for field in isrc_fields:
+                            if field in stream_tags and not result['isrc']:
+                                result['isrc'] = stream_tags[field]
+                                result['method'] = f"FFprobe stream ({field})"
+                                break
+                                
+        except Exception as e:
+            if 'error' not in result:
+                result['error'] = f"FFprobe error: {str(e)}"
+            else:
+                result['error'] += f" | FFprobe error: {str(e)}"
+    
+    # Método 3: Análisis hexadecimal (solo si no encontramos ISRC o deep_scan=True)
+    if deep_scan or not result['isrc']:
+        try:
+            with open(file_path, 'rb') as f:
+                # Leer diferentes partes del archivo donde suele estar el ISRC
+                chunks = []
+                
+                # Primeros 1MB (metadatos)
+                chunks.append(f.read(1000000))
+                
+                # Últimos 500KB (metadatos al final en algunos formatos)
+                f.seek(-500000, 2)
+                chunks.append(f.read(500000))
+                
+                # Medio del archivo (para algunos formatos especiales)
+                file_size = os.path.getsize(file_path)
+                if file_size > 2000000:
+                    f.seek(file_size // 2)
+                    chunks.append(f.read(100000))
+                
+                content = b''.join(chunks)
+                result['hex_data'] = content.hex()[:200] + "..."  # Solo una muestra
+                
+                # Patrones comunes de ISRC
+                patterns = [
+                    br'ISRC[=:]([A-Z]{2}[A-Z0-9]{3}\d{5})',
+                    br'([A-Z]{2}[A-Z0-9]{3}\d{5})',
+                    br'isrc[=:]([A-Z]{2}[A-Z0-9]{3}\d{5})',
+                    br'ISRC\s*[:=]\s*([A-Z]{2}[A-Z0-9]{3}\d{5})',
+                    br'Z\d{3}\d{5}',  # Algunos formatos alternativos
+                ]
+                
+                for i, pattern in enumerate(patterns):
+                    match = re.search(pattern, content, re.IGNORECASE)
+                    if match:
+                        found_isrc = match.group(1) if match.lastindex else match.group(0)
+                        if isinstance(found_isrc, bytes):
+                            found_isrc = found_isrc.decode('utf-8', errors='ignore')
+                        # Validar formato ISRC
+                        if re.match(r'^[A-Z]{2}[A-Z0-9]{3}\d{5}$', found_isrc):
+                            result['isrc'] = found_isrc
+                            result['method'] = f"Hex Pattern {i+1}"
+                            break
+        except Exception as e:
+            if 'error' not in result:
+                result['error'] = f"Hex analysis error: {str(e)}"
+            else:
+                result['error'] += f" | Hex analysis error: {str(e)}"
+    
+    # Método 4: Búsqueda en strings del archivo
+    if deep_scan and not result['isrc']:
+        try:
+            with open(file_path, 'rb') as f:
+                content = f.read(500000)  # Leer primeros 500KB
+                # Buscar strings legibles
+                strings = re.findall(b'[A-Za-z0-9=:]{10,50}', content)
+                for s in strings:
+                    try:
+                        decoded = s.decode('utf-8', errors='ignore')
+                        isrc_match = re.search(r'[A-Z]{2}[A-Z0-9]{3}\d{5}', decoded)
+                        if isrc_match:
+                            result['isrc'] = isrc_match.group(0)
+                            result['method'] = "String extraction"
+                            break
+                    except:
+                        continue
+        except Exception as e:
+            if 'error' not in result:
+                result['error'] = f"String extraction error: {str(e)}"
+            else:
+                result['error'] += f" | String extraction error: {str(e)}"
+    
+    # Calcular calidad de metadatos
+    result['isrc_found'] = result['isrc'] is not None
+    quality_score = 0
+    
+    if result['title']: quality_score += 15
+    if result['artist']: quality_score += 15
+    if result['album']: quality_score += 10
+    if result['isrc']: quality_score += 20
+    if result['year']: quality_score += 5
+    if result['genre']: quality_score += 5
+    if result['track_number']: quality_score += 5
+    if result['duration']: quality_score += 5
+    if result['bitrate'] and result['bitrate'] >= 192: quality_score += 10
+    if result['has_cover']: quality_score += 10
+    
+    result['quality_rating'] = quality_score
+    
+    return result
+
+def display_audio_info(info, detailed=False):
+    """Muestra información del audio de forma atractiva"""
+    # Color para el ISRC según si fue encontrado o no
+    isrc_color = Colors.GREEN if info.get('isrc') else Colors.RED
+    isrc_text = info.get('isrc', 'No encontrado')
+    
+    # Calidad de metadatos
+    quality = info.get('quality_rating', 0)
+    if quality >= 70:
+        quality_color = Colors.GREEN
+        quality_text = "Excelente"
+    elif quality >= 40:
+        quality_color = Colors.YELLOW
+        quality_text = "Regular"
+    else:
+        quality_color = Colors.RED
+        quality_text = "Mala"
+    
+    print(color(f"📁 Archivo: {info['filename']}", Colors.BLUE))
+    print(f"   🎵 {color('Título:', Colors.BOLD)} {info.get('title', 'Desconocido')}")
+    print(f"   🎤 {color('Artista:', Colors.BOLD)} {info.get('artist', 'Desconocido')}")
+    print(f"   💿 {color('Álbum:', Colors.BOLD)} {info.get('album', 'Desconocido')}")
+    print(f"   🏷️  {color('ISRC:', Colors.BOLD)} {color(isrc_text, isrc_color)}")
+    
+    if info.get('method'):
+        print(f"   🔍 {color('Método:', Colors.BOLD)} {info['method']}")
+    
+    print(f"   📊 {color('Calidad metadatos:', Colors.BOLD)} {color(f'{quality_text} ({quality}%)', quality_color)}")
+    
+    if detailed:
+        print(f"   ⏱️  {color('Duración:', Colors.BOLD)} {int(info['duration']) if info.get('duration') else '-'}s")
+        print(f"   🔊 {color('Bitrate:', Colors.BOLD)} {info.get('bitrate', '-')} kbps")
+        print(f"   📏 {color('Sample Rate:', Colors.BOLD)} {info.get('sample_rate', '-')} Hz")
+        print(f"   🎚️  {color('Canales:', Colors.BOLD)} {info.get('channels', '-')}")
+        print(f"   📦 {color('Tamaño:', Colors.BOLD)} {info['size'] // 1024} KB")
+        print(f"   📅 {color('Año:', Colors.BOLD)} {info.get('year', '-')}")
+        print(f"   🎼 {color('Género:', Colors.BOLD)} {info.get('genre', '-')}")
+        print(f"   🔢 {color('Pista:', Colors.BOLD)} {info.get('track_number', '-')}")
+        print(f"   🎹 {color('Compositor:', Colors.BOLD)} {info.get('composer', '-')}")
+        print(f"   🏢 {color('Discográfica:', Colors.BOLD)} {info.get('publisher', '-')}")
+        print(f"   🖼️  {color('Portada:', Colors.BOLD)} {'Sí' if info.get('has_cover') else 'No'}")
+        print(f"   📋 {color('Tipo:', Colors.BOLD)} {info.get('file_type', '-')}")
+        
+        if info.get('hex_data'):
+            print(f"   🔢 {color('Hex Sample:', Colors.BOLD)} {info['hex_data']}")
+        
+        if info.get('tags'):
+            print(f"   🏷️  {color('Etiquetas:', Colors.BOLD)}")
+            for k, v in list(info['tags'].items())[:5]:
+                print(f"        {k}: {v}")
+            if len(info['tags']) > 5:
+                print(f"        ... y {len(info['tags']) - 5} más")
+                
+        if info.get('error'):
+            print(f"   ⚠️  {color('Errores:', Colors.RED)} {info['error']}")
+
+# ===== BÚSQUEDA POR SIMILITUD =====
+def search_similar_songs(directory, target_song, similarity_threshold=70):
+    """Busca canciones similares basándose en metadatos"""
+    print(color(f"🔍 Buscando canciones similares a: {target_song.get('title', 'Unknown')}", Colors.CYAN))
+    
+    similar_songs = []
+    audio_files = []
+    
+    # Primero, encontrar todos los archivos de audio
+    for root, _, files in os.walk(directory):
+        for file in files:
+            if file.lower().endswith(SUPPORTED_AUDIO):
+                audio_files.append(os.path.join(root, file))
+    
+    # Procesar con barra de progreso
+    total = len(audio_files)
+    for i, file_path in enumerate(audio_files, 1):
+        print(color(f"   Analizando {i}/{total}: {os.path.basename(file_path)[:30]}...", Colors.YELLOW), end="\r")
+        
+        # Saltar el archivo objetivo
+        if file_path == target_song['file']:
+            continue
+            
+        song_info = extract_isrc_advanced(file_path)
+        similarity = calculate_similarity(target_song, song_info)
+        
+        if similarity >= similarity_threshold:
+            similar_songs.append((song_info, similarity))
+    
+    print()  # Nueva línea después de la barra de progreso
+    
+    # Ordenar por similitud
+    similar_songs.sort(key=lambda x: x[1], reverse=True)
+    
+    return similar_songs
+
+def calculate_similarity(song1, song2):
+    """Calcula la similitud entre dos canciones basándose en metadatos"""
+    similarity = 0
+    
+    # Comparar artistas
+    if song1.get('artist') and song2.get('artist'):
+        if song1['artist'].lower() == song2['artist'].lower():
+            similarity += 30
+        elif song1['artist'].lower() in song2['artist'].lower() or song2['artist'].lower() in song1['artist'].lower():
+            similarity += 15
+    
+    # Comparar títulos
+    if song1.get('title') and song2.get('title'):
+        if song1['title'].lower() == song2['title'].lower():
+            similarity += 25
+        elif song1['title'].lower() in song2['title'].lower() or song2['title'].lower() in song1['title'].lower():
+            similarity += 10
+    
+    # Comparar álbumes
+    if song1.get('album') and song2.get('album'):
+        if song1['album'].lower() == song2['album'].lower():
+            similarity += 15
+    
+    # Comparar duración (con margen de 10 segundos)
+    if song1.get('duration') and song2.get('duration'):
+        if abs(song1['duration'] - song2['duration']) <= 10:
+            similarity += 10
+    
+    # Mismo ISRC
+    if song1.get('isrc') and song2.get('isrc') and song1['isrc'] == song2['isrc']:
+        similarity += 50
+    
+    return min(similarity, 100)
+
 # ===== EXPLORADOR DE ARCHIVOS AVANZADO =====
 def advanced_file_browser(start_path="."):
     """Navegador interactivo de archivos con vista previa de metadatos"""
@@ -357,7 +725,8 @@ def advanced_file_browser(start_path="."):
         print("00. Seleccionar este directorio para buscar")
         print("000. Extraer ISRC del archivo seleccionado")
         print("0000. Analizar archivo en profundidad")
-        print("00000. Volver al menú principal")
+        print("00000. Buscar canciones similares")
+        print("000000. Volver al menú principal")
         
         try:
             choice = input("\nSelecciona una opción: ").strip()
@@ -371,13 +740,18 @@ def advanced_file_browser(start_path="."):
                 return current_path
             elif choice == "000" and selected_file:
                 # Extraer ISRC del archivo seleccionado
-                info = extract_isrc_advanced(selected_file)
+                info = extract_isrc_advanced(selected_file, deep_scan=True)
                 if info['isrc']:
                     print(color(f"✅ ISRC encontrado: {info['isrc']}", Colors.GREEN))
                     if input("¿Descargar versión de alta calidad? (s/n): ").lower() == 's':
                         download_by_isrc(info['isrc'], os.path.dirname(selected_file))
                 else:
                     print(color("❌ No se encontró ISRC en este archivo", Colors.RED))
+                    print(color("💡 Muchas canciones no tienen ISRC, especialmente:", Colors.YELLOW))
+                    print(color("   - Producciones independientes", Colors.YELLOW))
+                    print(color("   - Canciones antiguas (anteriores a 2000)", Colors.YELLOW))
+                    print(color("   - Archivos convertidos o modificados", Colors.YELLOW))
+                    print(color("   - Descargas de fuentes no oficiales", Colors.YELLOW))
                 input("\n⏎ Enter para continuar...")
             elif choice == "0000" and selected_file:
                 # Analizar archivo en profundidad
@@ -385,7 +759,21 @@ def advanced_file_browser(start_path="."):
                 info = extract_isrc_advanced(selected_file, deep_scan=True)
                 display_audio_info(info, detailed=True)
                 input("\n⏎ Enter para continuar...")
-            elif choice == "00000":
+            elif choice == "00000" and selected_file:
+                # Buscar canciones similares
+                print(color("🔍 Buscando canciones similares...", Colors.YELLOW))
+                info = extract_isrc_advanced(selected_file)
+                similar_songs = search_similar_songs(current_path, info)
+                
+                if similar_songs:
+                    print(color(f"\n🎵 Se encontraron {len(similar_songs)} canciones similares:", Colors.GREEN))
+                    for i, (song, similarity) in enumerate(similar_songs[:5], 1):
+                        print(color(f"{i}. Similitud: {similarity}%", Colors.WHITE))
+                        display_audio_info(song)
+                else:
+                    print(color("❌ No se encontraron canciones similares", Colors.RED))
+                input("\n⏎ Enter para continuar...")
+            elif choice == "000000":
                 # Volver al menú principal
                 return None
             elif choice.isdigit():
@@ -405,146 +793,6 @@ def advanced_file_browser(start_path="."):
                 
         except KeyboardInterrupt:
             return None
-
-# ===== MÉTODOS AVANZADOS DE EXTRACCIÓN ISRC =====
-def extract_isrc_advanced(file_path, deep_scan=False):
-    """Extrae ISRC usando múltiples métodos avanzados"""
-    result = {
-        'file': file_path, 
-        'isrc': None, 
-        'artist': None, 
-        'album': None, 
-        'title': None, 
-        'duration': None, 
-        'bitrate': None,
-        'size': os.path.getsize(file_path) if os.path.exists(file_path) else 0,
-        'tags': {},
-        'method': None,
-        'hex_data': None
-    }
-    
-    # Método 1: FFprobe (metadatos estándar)
-    if check_ffprobe():
-        try:
-            proc = subprocess.run(
-                ['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_format', '-show_streams', file_path],
-                capture_output=True, text=True, timeout=15
-            )
-            if proc.returncode == 0:
-                info = json.loads(proc.stdout)
-                tags = info.get('format', {}).get('tags', {})
-                result['tags'] = tags
-                
-                # Buscar ISRC en diferentes campos de metadatos
-                isrc_fields = ['ISRC', 'TSRC', 'isrc', 'ISRC_code', 'ISRC_Code']
-                for field in isrc_fields:
-                    if field in tags:
-                        result['isrc'] = tags[field]
-                        result['method'] = f"FFprobe ({field})"
-                        break
-                
-                result['title'] = tags.get('title') or tags.get('TITLE')
-                result['artist'] = tags.get('artist') or tags.get('ARTIST') or tags.get('composer')
-                result['album'] = tags.get('album') or tags.get('ALBUM')
-                result['duration'] = float(info['format'].get('duration', 0))
-                result['bitrate'] = int(info['format'].get('bit_rate', 0)) // 1000 if info['format'].get('bit_rate') else None
-        except Exception:
-            pass
-    
-    # Si no encontramos ISRC o queremos un escaneo profundo
-    if deep_scan or not result['isrc']:
-        # Método 2: Análisis hexadecimal (búsqueda profunda de ISRC)
-        try:
-            with open(file_path, 'rb') as f:
-                # Leer diferentes partes del archivo donde suele estar el ISRC
-                chunks = []
-                
-                # Primeros 1MB (metadatos)
-                chunks.append(f.read(1000000))
-                
-                # Últimos 500KB (metadatos al final en algunos formatos)
-                f.seek(-500000, 2)
-                chunks.append(f.read(500000))
-                
-                # Medio del archivo (para algunos formatos especiales)
-                file_size = os.path.getsize(file_path)
-                if file_size > 2000000:
-                    f.seek(file_size // 2)
-                    chunks.append(f.read(100000))
-                
-                content = b''.join(chunks)
-                result['hex_data'] = content.hex()[:200] + "..."  # Solo una muestra
-                
-                # Patrones comunes de ISRC
-                patterns = [
-                    br'ISRC[=:]([A-Z]{2}[A-Z0-9]{3}\d{5})',
-                    br'([A-Z]{2}[A-Z0-9]{3}\d{5})',
-                    br'isrc[=:]([A-Z]{2}[A-Z0-9]{3}\d{5})',
-                    br'ISRC\s*[:=]\s*([A-Z]{2}[A-Z0-9]{3}\d{5})',
-                    br'Z\d{3}\d{5}',  # Algunos formatos alternativos
-                ]
-                
-                for i, pattern in enumerate(patterns):
-                    match = re.search(pattern, content, re.IGNORECASE)
-                    if match:
-                        found_isrc = match.group(1) if match.lastindex else match.group(0)
-                        if isinstance(found_isrc, bytes):
-                            found_isrc = found_isrc.decode('utf-8', errors='ignore')
-                        # Validar formato ISRC
-                        if re.match(r'^[A-Z]{2}[A-Z0-9]{3}\d{5}$', found_isrc):
-                            result['isrc'] = found_isrc
-                            result['method'] = f"Hex Pattern {i+1}"
-                            break
-        except Exception as e:
-            result['error'] = str(e)
-    
-    # Método 3: Búsqueda en strings del archivo
-    if deep_scan and not result['isrc']:
-        try:
-            with open(file_path, 'rb') as f:
-                content = f.read(500000)  # Leer primeros 500KB
-                # Buscar strings legibles
-                strings = re.findall(b'[A-Za-z0-9=:]{10,50}', content)
-                for s in strings:
-                    try:
-                        decoded = s.decode('utf-8', errors='ignore')
-                        isrc_match = re.search(r'[A-Z]{2}[A-Z0-9]{3}\d{5}', decoded)
-                        if isrc_match:
-                            result['isrc'] = isrc_match.group(0)
-                            result['method'] = "String extraction"
-                            break
-                    except:
-                        continue
-        except Exception:
-            pass
-    
-    return result
-
-def display_audio_info(info, detailed=False):
-    """Muestra información del audio de forma atractiva"""
-    print(color(f"📁 Archivo: {info['file']}", Colors.BLUE))
-    print(f"   🎵 {color('Título:', Colors.BOLD)} {info.get('title', 'Desconocido')}")
-    print(f"   🎤 {color('Artista:', Colors.BOLD)} {info.get('artist', 'Desconocido')}")
-    print(f"   💿 {color('Álbum:', Colors.BOLD)} {info.get('album', 'Desconocido')}")
-    print(f"   🏷️  {color('ISRC:', Colors.BOLD)} {color(info.get('isrc', 'No encontrado'), Colors.CYAN if info.get('isrc') else Colors.RED)}")
-    
-    if info.get('method'):
-        print(f"   🔍 {color('Método:', Colors.BOLD)} {info['method']}")
-    
-    if detailed:
-        print(f"   ⏱️  {color('Duración:', Colors.BOLD)} {int(info['duration']) if info.get('duration') else '-'}s")
-        print(f"   📊 {color('Bitrate:', Colors.BOLD)} {info.get('bitrate', '-')} kbps")
-        print(f"   📦 {color('Tamaño:', Colors.BOLD)} {info['size'] // 1024} KB")
-        
-        if info.get('hex_data'):
-            print(f"   🔢 {color('Hex Sample:', Colors.BOLD)} {info['hex_data']}")
-        
-        if info.get('tags'):
-            print(f"   🏷️  {color('Etiquetas:', Colors.BOLD)}")
-            for k, v in list(info['tags'].items())[:5]:  # Mostrar solo las primeras 5
-                print(f"        {k}: {v}")
-            if len(info['tags']) > 5:
-                print(f"        ... y {len(info['tags']) - 5} más")
 
 # ===== BÚSQUEDA Y DESCARGA POR ISRC =====
 def download_by_isrc(isrc, output_dir="descargas_isrc"):
@@ -711,7 +959,8 @@ def print_guide():
     print("6. 📁 Navegador de archivos avanzado")
     print("7. 🔄 Verificar actualizaciones")
     print("8. ⚙️  Instalar herramientas")
-    print("9. ❌ Salir\n")
+    print("9. 📊 Estadísticas de biblioteca")
+    print("10. ❌ Salir\n")
 
 def main_menu():
     clear()
@@ -727,6 +976,7 @@ def main_menu():
         "📁 Navegador de archivos avanzado",
         "🔄 Verificar actualizaciones",
         "⚙️ Instalar herramientas",
+        "📊 Estadísticas de biblioteca",
         "❌ Salir"
     ]
     
@@ -813,6 +1063,11 @@ def search_by_isrc_menu():
             play_song(found[int(play)-1]['file'])
     else:
         print(color(f"❌ No se encontraron archivos con ISRC {isrc_code}", Colors.RED))
+        print(color("💡 Solo el 30-40% de las canciones suelen tener ISRC", Colors.YELLOW))
+        print(color("   Los ISRC son más comunes en:", Colors.YELLOW))
+        print(color("   - Música comercial reciente", Colors.YELLOW))
+        print(color("   - Lanzamientos de discográficas grandes", Colors.YELLOW))
+        print(color("   - Plataformas de distribución profesional", Colors.YELLOW))
     
     input("\n⏎ Enter para continuar...")
 
@@ -842,6 +1097,10 @@ def download_by_isrc_menu():
             play_song(filename)
     else:
         print(color("❌ No se pudo descargar el archivo.", Colors.RED))
+        print(color("💡 Posibles razones:", Colors.YELLOW))
+        print(color("   - El ISRC no existe en la base de datos", Colors.YELLOW))
+        print(color("   - Problemas de conexión con los proveedores", Colors.YELLOW))
+        print(color("   - El token de acceso ha expirado", Colors.YELLOW))
     
     input("\n⏎ Enter para continuar...")
 
@@ -975,6 +1234,101 @@ def tools_menu():
             print(color("❌ Sin conexión a internet.", Colors.RED))
         input("\n⏎ Enter para continuar...")
 
+def library_stats_menu():
+    clear()
+    print(color("📊 Estadísticas de Biblioteca", Colors.BOLD))
+    
+    print("Selecciona el directorio a analizar:")
+    directory = advanced_file_browser()
+    if directory is None:
+        return
+    
+    if not os.path.isdir(directory):
+        print(color("❌ El directorio no existe.", Colors.RED))
+        time.sleep(2)
+        return
+    
+    print(color("⏳ Analizando biblioteca musical...", Colors.CYAN))
+    
+    audio_files = []
+    for root, _, files in os.walk(directory):
+        for file in files:
+            if file.lower().endswith(SUPPORTED_AUDIO):
+                audio_files.append(os.path.join(root, file))
+    
+    total_files = len(audio_files)
+    if total_files == 0:
+        print(color("❌ No se encontraron archivos de audio.", Colors.RED))
+        input("\n⏎ Enter para continuar...")
+        return
+    
+    # Estadísticas
+    has_isrc = 0
+    has_cover = 0
+    quality_scores = []
+    total_duration = 0
+    total_size = 0
+    artists = set()
+    albums = set()
+    genres = set()
+    years = set()
+    
+    # Procesar con barra de progreso
+    for i, file_path in enumerate(audio_files, 1):
+        print(color(f"   Analizando {i}/{total_files}: {os.path.basename(file_path)[:30]}...", Colors.YELLOW), end="\r")
+        info = extract_isrc_advanced(file_path)
+        
+        if info.get('isrc'):
+            has_isrc += 1
+        if info.get('has_cover'):
+            has_cover += 1
+        if info.get('quality_rating'):
+            quality_scores.append(info['quality_rating'])
+        if info.get('duration'):
+            total_duration += info['duration']
+        if info.get('size'):
+            total_size += info['size']
+        if info.get('artist'):
+            artists.add(info['artist'])
+        if info.get('album'):
+            albums.add(info['album'])
+        if info.get('genre'):
+            genres.add(info['genre'])
+        if info.get('year'):
+            years.add(info['year'])
+    
+    print()  # Nueva línea después de la barra de progreso
+    
+    # Calcular promedios
+    avg_quality = sum(quality_scores) / len(quality_scores) if quality_scores else 0
+    isrc_percentage = (has_isrc / total_files) * 100
+    cover_percentage = (has_cover / total_files) * 100
+    
+    # Mostrar estadísticas
+    print(color("\n📊 ESTADÍSTICAS DE LA BIBLIOTECA:", Colors.BOLD))
+    print(f"   📁 {color('Archivos totales:', Colors.BOLD)} {total_files}")
+    print(f"   🏷️  {color('Con ISRC:', Colors.BOLD)} {has_isrc} ({isrc_percentage:.1f}%)")
+    print(f"   🖼️  {color('Con portada:', Colors.BOLD)} {has_cover} ({cover_percentage:.1f}%)")
+    print(f"   ⭐ {color('Calidad promedio:', Colors.BOLD)} {avg_quality:.1f}%")
+    print(f"   ⏱️  {color('Duración total:', Colors.BOLD)} {int(total_duration // 3600)}h {int((total_duration % 3600) // 60)}m")
+    print(f"   📦 {color('Tamaño total:', Colors.BOLD)} {total_size / (1024**3):.2f} GB")
+    print(f"   🎤 {color('Artistas únicos:', Colors.BOLD)} {len(artists)}")
+    print(f"   💿 {color('Álbumes únicos:', Colors.BOLD)} {len(albums)}")
+    print(f"   🎼 {color('Géneros únicos:', Colors.BOLD)} {len(genres)}")
+    print(f"   📅 {color('Años únicos:', Colors.BOLD)} {len(years)}")
+    
+    # Explicación sobre el bajo porcentaje de ISRC
+    if isrc_percentage < 50:
+        print(color("\n💡 ¿Por qué tan pocos ISRC?", Colors.YELLOW))
+        print(color("   Solo el 30-40% de las canciones suelen tener ISRC", Colors.YELLOW))
+        print(color("   Los ISRC son más comunes en:", Colors.YELLOW))
+        print(color("   - Música comercial reciente", Colors.YELLOW))
+        print(color("   - Lanzamientos de discográficas grandes", Colors.YELLOW))
+        print(color("   - Plataformas de distribución profesional", Colors.YELLOW))
+        print(color("   - Artistas establecidos con management profesional", Colors.YELLOW))
+    
+    input("\n⏎ Enter para continuar...")
+
 # ===== MAIN =====
 def main():
     # Verificar dependencias al inicio
@@ -1008,6 +1362,8 @@ def main():
             elif option == "8":
                 tools_menu()
             elif option == "9":
+                library_stats_menu()
+            elif option == "10":
                 print(color("👋 ¡Hasta pronto!", Colors.CYAN))
                 updater.stop_update_checker()
                 break
