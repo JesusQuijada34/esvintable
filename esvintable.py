@@ -178,7 +178,7 @@ class UpdateChecker:
                     self.new_version = self.remote_version
                     
                     if not silent and not self.notification_shown:
-                        print(color(f"\n🎉 ¡Nueva versión disponible! v{self.local_version} → v{self.new_version}", Colors.GREEN))
+                        print(color(f"\n🎉 ¡Nueva versión disponible! {self.local_version} → {self.new_version}", Colors.GREEN))
                         if self.update_info.get('critical', False):
                             print(color("🚨 ACTUALIZACIÓN CRÍTICA: Se recomienda actualizar inmediatamente", Colors.RED))
                         if self.update_info.get('message'):
@@ -967,7 +967,7 @@ def print_banner():
 ║{Colors.MAGENTA}          ██╔══╝  ╚════██║╚██╗ ██╔╝██║██║╚██╗██║   ██║             {Colors.CYAN}║
 ║{Colors.MAGENTA}          ███████╗███████║ ╚████╔╝ ██║██║ ╚████║   ██║             {Colors.CYAN}║
 ║{Colors.MAGENTA}          ╚══════╝╚══════╝  ╚═══╝  ╚═╝╚═╝  ╚═══╝   ╚═╝             {Colors.CYAN}║
-║{Colors.LIGHT_BLUE}                Ultimate PRO v{current_version:<15}               {Colors.CYAN}║
+║{Colors.LIGHT_BLUE}                Ultimate PRO {current_version:<15}               {Colors.CYAN}║
 ║{Colors.LIGHT_GREEN}       Búsqueda Avanzada & Descarga por ISRC - Multiplataforma    {Colors.CYAN}║
 ║{Colors.YELLOW}         GitHub.com/JesusQuijada34/esvintable                {Colors.CYAN}║
 ║{Colors.WHITE}                Plataforma: {PLATFORM_LABEL:<20}               {Colors.CYAN}║
