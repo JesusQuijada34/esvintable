@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-#Mejorable
 # -*- coding: utf-8 -*-
-# esVintable Ultimate PRO - Multiplataforma
+# Y esVintable Ultimate PRO - Multiplataforma
 # Autor: @JesusQuijada34 | GitHub.com/JesusQuijada34/esvintable
 # Última actualización: 2025-09-17
 
