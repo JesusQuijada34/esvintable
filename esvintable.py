@@ -884,6 +884,7 @@ MAIN_MENU = [
 def print_banner():
     print(color("============================================", Colors.BRIGHT_BLUE))
     print(color(f" 🎵 ESVINTABLE - {PLATFORM_LABEL}", Colors.BRIGHT_GREEN))
+    print(color(f" Mejorado por: @MkelCT | @JesusQuijada34", Colors.BRIGHT_GREEN))
     print(color("============================================", Colors.BRIGHT_BLUE))
 
 def print_menu(selected_index=0):
