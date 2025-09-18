@@ -30,7 +30,7 @@ SCRIPT_FILENAME = "esvintable.py"
 DETAILS_XML_URL = f"{REPO_RAW_URL}details.xml"
 LOCAL_XML_FILE = "details.xml"
 UPDATE_INTERVAL = 10  # Verificar cada 10 segundos
-TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIxODkyNDQ0MDEiLCJkZXZpY2VJZCI6IjE1NDAyNjIyMCIsInRyYW5zYWN0aW9uId"  # Token truncado por seguridad
+TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIxODkyNDQ0MDEiLCJkZXZpY2VJZCI6IjE1NDAyNjIyMCIsInRyYW5zYWN0aW9uId":  # Token truncado por seguridad
 
 # Proveedores de música para búsqueda ISRC
 PROVIDERS = [
@@ -196,51 +196,30 @@ class UpdateChecker:
     def check_for_updates(self, silent=False):
         """Verifica si hay actualizaciones disponibles comparando solo la versión"""
         try:
-            # Primera verificación: solo comparar versiones
-            if self.first_check:
-                remote_ver = self.get_remote_version()
-                if remote_ver and self.compare_versions(self.local_version, remote_ver):
-                    # Segunda verificación: obtener información completa
-                    self.update_info = self.get_remote_info_from_xml()
-                    if self.update_info and 'version' in self.update_info:
-                        self.remote_version = self.update_info['version']
-                        
-                        if self.compare_versions(self.local_version, self.remote_version):
-                            # Actualizar XML local
-                            if self.download_xml_update():
-                                self.local_version = self.remote_version
-                            
-                            self.update_available = True
-                            self.new_version = self.remote_version
-                            
-                            if not silent and not self.notification_shown:
-                                self.show_update_notification()
-                                self.notification_shown = True
-                            
-                            return True
-                self.first_check = False
-            else:
-                # Verificaciones posteriores
-                self.update_info = self.get_remote_info_from_xml()
-                if self.update_info and 'version' in self.update_info:
-                    self.remote_version = self.update_info['version']
+            # Obtener información completa del XML remoto
+            self.update_info = self.get_remote_info_from_xml()
+            
+            if self.update_info and 'version' in self.update_info:
+                self.remote_version = self.update_info['version']
+                
+                # Comparar versiones
+                if self.compare_versions(self.local_version, self.remote_version):
+                    # Actualizar XML local
+                    if self.download_xml_update():
+                        self.local_version = self.remote_version
                     
-                    if self.compare_versions(self.local_version, self.remote_version):
-                        # Actualizar XML local
-                        if self.download_xml_update():
-                            self.local_version = self.remote_version
-                        
-                        self.update_available = True
-                        self.new_version = self.remote_version
-                        
-                        if not silent and not self.notification_shown:
-                            self.show_update_notification()
-                            self.notification_shown = True
-                        
-                        return True
+                    self.update_available = True
+                    self.new_version = self.remote_version
                     
-        except Exception:
-            pass
+                    if not silent and not self.notification_shown:
+                        self.show_update_notification()
+                        self.notification_shown = True
+                    
+                    return True
+                    
+        except Exception as e:
+            if not silent:
+                print(color(f"❌ Error al verificar actualizaciones: {e}", Colors.RED))
         return False
     
     def show_update_notification(self):
@@ -784,698 +763,425 @@ def advanced_file_browser(start_path="."):
         print("000. Extraer ISRC del archivo seleccionado")
         print("0000. Analizar archivo en profundidad")
         print("00000. Buscar canciones similares")
-        print("000000. Volver al menú principal")
+        print("000000. Salir del navegador")
         
-        try:
-            choice = input("\nSelecciona una opción: ").strip()
-            
-            if choice == "0":
-                current_path = os.path.dirname(current_path)
-                selected_file = None
-            elif choice == "00":
-                return current_path
-            elif choice == "000" and selected_file:
+        choice = input("\nSelecciona una opción: ").strip()
+        
+        if choice == "0":
+            # Volver al directorio anterior
+            current_path = os.path.dirname(current_path)
+            selected_file = None
+        elif choice == "00":
+            # Seleccionar este directorio
+            return current_path
+        elif choice == "000":
+            # Extraer ISRC del archivo seleccionado
+            if selected_file:
                 info = extract_isrc_advanced(selected_file, deep_scan=True)
-                if info['isrc']:
-                    print(color(f"✅ ISRC encontrado: {info['isrc']}", Colors.BRIGHT_GREEN))
-                    if input("¿Descargar versión de alta calidad? (s/n): ").lower() == 's':
-                        download_by_isrc(info['isrc'], os.path.dirname(selected_file))
-                else:
-                    print(color("❌ No se encontró ISRC en este archivo", Colors.BRIGHT_RED))
-                    print(color("💡 Muchas canciones no tienen ISRC, especialmente:", Colors.BRIGHT_YELLOW))
-                    print(color("   - Producciones independientes", Colors.BRIGHT_YELLOW))
-                    print(color("   - Canciones antiguas (anteriores a 2000)", Colors.BRIGHT_YELLOW))
-                    print(color("   - Archivos convertidos o modificados", Colors.BRIGHT_YELLOW))
-                    print(color("   - Descargas de fuentes no oficiales", Colors.BRIGHT_YELLOW))
-                input("\n⏎ Enter para continuar...")
-            elif choice == "0000" and selected_file:
-                print(color("🔍 Analizando archivo en profundidad...", Colors.BRIGHT_YELLOW))
-                info = extract_isrc_advanced(selected_file, deep_scan=True)
+                clear()
+                print(color("🔍 ANÁLISIS EN PROFUNDIDAD:", Colors.BRIGHT_BLUE))
                 display_audio_info(info, detailed=True)
-                input("\n⏎ Enter para continuar...")
-            elif choice == "00000" and selected_file:
-                print(color("🔍 Buscando canciones similares...", Colors.BRIGHT_YELLOW))
-                info = extract_isrc_advanced(selected_file)
-                similar_songs = search_similar_songs(current_path, info)
-                
-                if similar_songs:
-                    print(color(f"\n🎵 Se encontraron {len(similar_songs)} canciones similares:", Colors.BRIGHT_GREEN))
-                    for i, (song, similarity) in enumerate(similar_songs[:5], 1):
-                        print(color(f"{i}. Similitud: {similarity}%", Colors.WHITE))
-                        display_audio_info(song)
-                else:
-                    print(color("❌ No se encontraron canciones similares", Colors.BRIGHT_RED))
-                input("\n⏎ Enter para continuar...")
-            elif choice == "000000":
-                return None
-            elif choice.isdigit():
-                idx = int(choice) - 1
-                if 0 <= idx < len(directories):
-                    current_path = os.path.join(current_path, directories[idx])
-                    selected_file = None
-                elif len(directories) <= idx < len(directories) + len(audio_files):
-                    selected_file = os.path.join(current_path, audio_files[idx - len(directories)])
-                else:
-                    print(color("❌ Opción inválida", Colors.BRIGHT_RED))
-                    time.sleep(1)
+                input("\nPresiona Enter para continuar...")
             else:
-                print(color("❌ Opción inválida", Colors.BRIGHT_RED))
+                print(color("❌ Primero selecciona un archivo", Colors.RED))
                 time.sleep(1)
-                
-        except KeyboardInterrupt:
+        elif choice == "0000":
+            # Analizar archivo en profundidad
+            if selected_file:
+                info = extract_isrc_advanced(selected_file, deep_scan=True)
+                clear()
+                print(color("🔍 ANÁLISIS EN PROFUNDIDAD:", Colors.BRIGHT_BLUE))
+                display_audio_info(info, detailed=True)
+                input("\nPresiona Enter para continuar...")
+            else:
+                print(color("❌ Primero selecciona un archivo", Colors.RED))
+                time.sleep(1)
+        elif choice == "00000":
+            # Buscar canciones similares
+            if selected_file:
+                info = extract_isrc_advanced(selected_file)
+                similar = search_similar_songs(current_path, info)
+                clear()
+                print(color("🎵 CANCIONES SIMILARES ENCONTRADAS:", Colors.BRIGHT_BLUE))
+                for song, similarity in similar[:10]:
+                    print(f"   {color(f'{similarity}%', Colors.BRIGHT_GREEN)} - {song.get('title', 'Unknown')} - {song.get('artist', 'Unknown')}")
+                input("\nPresiona Enter para continuar...")
+            else:
+                print(color("❌ Primero selecciona un archivo", Colors.RED))
+                time.sleep(1)
+        elif choice == "000000":
+            # Salir
             return None
-
-# ===== BÚSQUEDA Y DESCARGA POR ISRC =====
-def download_by_isrc(isrc, output_dir="descargas_isrc"):
-    """Descarga una canción por su código ISRC"""
-    scraper = cloudscraper.create_scraper()
-    
-    print(color(f"🔍 Buscando ISRC: {isrc}", Colors.BRIGHT_CYAN))
-    
-    for provider in PROVIDERS:
-        try:
-            url = f"https://mds.projectcarmen.com/stream/download?provider={provider}&isrc={isrc}"
-            headers = {"Authorization": f"Bearer {TOKEN}"}
-            
-            print(color(f"   Probando {provider}...", Colors.BRIGHT_YELLOW))
-            response = scraper.get(url, headers=headers, timeout=20)
-            
-            if response.status_code == 200:
-                os.makedirs(output_dir, exist_ok=True)
-                filename = os.path.join(output_dir, f"{isrc}_{provider}.m4a")
-                
-                with open(filename, 'wb') as f:
-                    f.write(response.content)
-                
-                print(color(f"✅ Descargado: {filename}", Colors.BRIGHT_GREEN))
-                return True, filename
-            elif response.status_code == 404:
-                print(color(f"   ❌ No encontrado en {provider}", Colors.BRIGHT_RED))
-            else:
-                print(color(f"   ⚠️  Error {response.status_code} en {provider}", Colors.BRIGHT_YELLOW))
-                
-        except requests.exceptions.Timeout:
-            print(color(f"   ⏰ Timeout con {provider}", Colors.BRIGHT_YELLOW))
-        except requests.exceptions.ConnectionError:
-            print(color(f"   🔌 Error de conexión con {provider}", Colors.BRIGHT_YELLOW))
-        except Exception as e:
-            print(color(f"   ⚠️  Error con {provider}: {str(e)}", Colors.BRIGHT_YELLOW))
-            continue
-    
-    return False, None
-
-def search_isrc_in_directory(directory, isrc_code):
-    """Busca un ISRC específico en todos los archivos de un directorio"""
-    print(color(f"🔍 Buscando ISRC {isrc_code} en {directory}", Colors.BRIGHT_CYAN))
-    
-    found_files = []
-    audio_files = []
-    
-    for root, _, files in os.walk(directory):
-        for file in files:
-            if file.lower().endswith(SUPPORTED_AUDIO):
-                audio_files.append(os.path.join(root, file))
-    
-    total = len(audio_files)
-    for i, file_path in enumerate(audio_files, 1):
-        print(color(f"   Escaneando {i}/{total}: {os.path.basename(file_path)[:30]}...", Colors.BRIGHT_YELLOW), end="\r")
-        audio_info = extract_isrc_advanced(file_path)
-        if audio_info['isrc'] and audio_info['isrc'].upper() == isrc_code.upper():
-            found_files.append(audio_info)
-    
-    print()
-    return found_files
-
-# ===== BÚSQUEDA EN SERVICIOS DE MÚSICA ALTERNATIVOS =====
-def search_music_services(query, service="all"):
-    """Busca en múltiples servicios de música"""
-    results = {}
-    
-    print(color(f"🔍 Buscando '{query}' en servicios de música...", Colors.BRIGHT_CYAN))
-    
-    services = ["Deezer", "SoundCloud", "Bandcamp", "Internet Archive"]
-    
-    for svc in services:
-        print(color(f"   Buscando en {svc}...", Colors.BRIGHT_YELLOW))
-        time.sleep(0.5)
-        results[svc.lower()] = [f"Resultado 1 de {svc}", f"Resultado 2 de {svc}"]
-    
-    return results
-
-# ===== FILTRADO DE CANCIONES =====
-def filter_songs(directory, filters):
-    """Filtrado multiplataforma por metadatos"""
-    results = []
-    audio_files = []
-    
-    for root, _, files in os.walk(directory):
-        for f in files:
-            if f.lower().endswith(SUPPORTED_AUDIO):
-                audio_files.append(os.path.join(root, f))
-    
-    total = len(audio_files)
-    for i, path in enumerate(audio_files, 1):
-        print(color(f"   Escaneando {i}/{total}: {os.path.basename(path)[:30]}...", Colors.BRIGHT_YELLOW), end="\r")
-        info = extract_isrc_advanced(path)
-        match = True
-        for k, v in filters.items():
-            if v and (str(info.get(k, '')).lower().find(v.lower()) == -1):
-                match = False
-                break
-        if match:
-            results.append(info)
-    
-    print()
-    return results
-
-# ===== REPRODUCCIÓN =====
-def play_song(file_path):
-    """Reproduce multiplataforma con ffplay si está disponible"""
-    if not check_ffplay():
-        print(color("⚠️  ffplay no está instalado.", Colors.BRIGHT_RED))
-        install = input("¿Instalar FFmpeg? (s/n): ").lower()
-        if install == 's':
-            if install_ffmpeg_tools():
-                return play_song(file_path)
-        return
-    
-    print(color(f"🎧 Reproduciendo: {os.path.basename(file_path)}", Colors.BRIGHT_GREEN))
-    try:
-        if IS_WINDOWS:
-            subprocess.run(['ffplay', '-nodisp', '-autoexit', file_path], 
-                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         else:
-            subprocess.run(['ffplay', '-nodisp', '-autoexit', file_path], 
-                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except Exception:
-        print(color("❌ Error al reproducir la canción.", Colors.BRIGHT_RED))
+            try:
+                index = int(choice) - 1
+                if index < len(directories):
+                    # Navegar a directorio
+                    selected_dir = directories[index]
+                    current_path = os.path.join(current_path, selected_dir)
+                    selected_file = None
+                elif index < len(directories) + len(audio_files):
+                    # Seleccionar archivo de audio
+                    file_index = index - len(directories)
+                    selected_file = os.path.join(current_path, audio_files[file_index])
+                else:
+                    # Otros archivos
+                    print(color("❌ Este archivo no es de audio", Colors.RED))
+                    time.sleep(1)
+            except ValueError:
+                print(color("❌ Opción no válida", Colors.RED))
+                time.sleep(1)
 
-# ===== BANNER MEJORADO =====
-def print_banner():
-    try:
-        if os.path.exists(LOCAL_XML_FILE):
-            tree = ET.parse(LOCAL_XML_FILE)
-            root = tree.getroot()
-            version_element = root.find('version')
-            if version_element is not None:
-                current_version = version_element.text.strip()
-            else:
-                current_version = "Desconocida"
-        else:
-            current_version = "Desconocida"
-    except:
-        current_version = "Desconocida"
-    
-    banner = f"""
-{Colors.BRIGHT_CYAN}{Colors.BOLD}╔══════════════════════════════════════════════════════════════╗
-║{Colors.BRIGHT_MAGENTA}          ███████╗███████╗██╗   ██╗██╗███╗   ██╗████████╗          {Colors.BRIGHT_CYAN}║
-║{Colors.BRIGHT_MAGENTA}          ██╔════╝██╔════╝██║   ██║██║████╗  ██║╚══██╔══╝          {Colors.BRIGHT_CYAN}║
-║{Colors.BRIGHT_MAGENTA}          █████╗  ███████╗██║   ██║██║██╔██╗ ██║   ██║             {Colors.BRIGHT_CYAN}║
-║{Colors.BRIGHT_MAGENTA}          ██╔══╝  ╚════██║╚██╗ ██╔╝██║██║╚██╗██║   ██║             {Colors.BRIGHT_CYAN}║
-║{Colors.BRIGHT_MAGENTA}          ███████╗███████║ ╚████╔╝ ██║██║ ╚████║   ██║             {Colors.BRIGHT_CYAN}║
-║{Colors.BRIGHT_MAGENTA}          ╚══════╝╚══════╝  ╚═══╝  ╚═╝╚═╝  ╚═══╝   ╚═╝             {Colors.BRIGHT_CYAN}║
-║{Colors.BRIGHT_BLUE}                Ultimate PRO v{current_version:<15}               {Colors.BRIGHT_CYAN}║
-║{Colors.BRIGHT_GREEN}       Búsqueda Avanzada & Descarga por ISRC - Multiplataforma    {Colors.BRIGHT_CYAN}║
-║{Colors.BRIGHT_YELLOW}         GitHub.com/JesusQuijada34/esvintable                {Colors.BRIGHT_CYAN}║
-║{Colors.BRIGHT_WHITE}                Plataforma: {PLATFORM_LABEL:<20}               {Colors.BRIGHT_CYAN}║
-╚══════════════════════════════════════════════════════════════╝
-{Colors.END}"""
-    print(banner)
-
-def print_guide():
-    print(color("🛠️  GUÍA RÁPIDA:", Colors.BRIGHT_YELLOW))
-    print("1. 🔍 Buscar canciones por metadatos (título, artista, álbum, ISRC)")
-    print("2. 🏷️  Buscar ISRC específico en directorios")
-    print("3. 📥 Descargar canciones por código ISRC")
-    print("4. 🎧 Reproducir archivos de audio")
-    print("5. 🌐 Búsqueda en servicios de música")
-    print("6. 📁 Navegador de archivos avanzado")
-    print("7. 🔄 Verificar actualizaciones")
-    print("8. ⚙️  Instalar herramientas")
-    print("9. 📊 Estadísticas de biblioteca")
-    print("10. 🎯 Búsqueda inteligente")
-    print("11. ❌ Salir\n")
-
-def main_menu():
+# ===== MENÚ PRINCIPAL =====
+def show_menu():
+    """Muestra el menú principal con opciones"""
     clear()
-    print_banner()
-    print_guide()
+    print(color("╔══════════════════════════════════════════════════════════════╗", Colors.BRIGHT_BLUE))
+    print(color("║", Colors.BRIGHT_BLUE) + color("                   🎵 ESVINTABLE ULTIMATE PRO 🎵                   ", Colors.BG_BLUE + Colors.BRIGHT_YELLOW) + color("║", Colors.BRIGHT_BLUE))
+    print(color("╠══════════════════════════════════════════════════════════════╣", Colors.BRIGHT_BLUE))
+    print(color("║", Colors.BRIGHT_BLUE) + color(f"   Plataforma: {PLATFORM_LABEL:<20} v{updater.local_version:<10} ", Colors.BRIGHT_WHITE) + color("║", Colors.BRIGHT_BLUE))
+    print(color("╠══════════════════════════════════════════════════════════════╣", Colors.BRIGHT_BLUE))
+    print(color("║", Colors.BRIGHT_BLUE) + color("   1. Buscar ISRC en archivo individual                      ", Colors.BRIGHT_GREEN) + color("║", Colors.BRIGHT_BLUE))
+    print(color("║", Colors.BRIGHT_BLUE) + color("   2. Buscar ISRC en directorio                             ", Colors.BRIGHT_GREEN) + color("║", Colors.BRIGHT_BLUE))
+    print(color("║", Colors.BRIGHT_BLUE) + color("   3. Buscar ISRC en múltiples directorios                  ", Colors.BRIGHT_GREEN) + color("║", Colors.BRIGHT_BLUE))
+    print(color("║", Colors.BRIGHT_BLUE) + color("   4. Explorador de archivos avanzado                       ", Colors.BRIGHT_CYAN) + color("║", Colors.BRIGHT_BLUE))
+    print(color("║", Colors.BRIGHT_BLUE) + color("   5. Analizar calidad de metadatos                         ", Colors.BRIGHT_CYAN) + color("║", Colors.BRIGHT_BLUE))
+    print(color("║", Colors.BRIGHT_BLUE) + color("   6. Buscar canciones similares                            ", Colors.BRIGHT_CYAN) + color("║", Colors.BRIGHT_BLUE))
+    print(color("║", Colors.BRIGHT_BLUE) + color("   7. Verificar actualizaciones                             ", Colors.BRIGHT_YELLOW) + color("║", Colors.BRIGHT_BLUE))
+    print(color("║", Colors.BRIGHT_BLUE) + color("   8. Configuración                                         ", Colors.BRIGHT_YELLOW) + color("║", Colors.BRIGHT_BLUE))
+    print(color("║", Colors.BRIGHT_BLUE) + color("   9. Salir                                                 ", Colors.BRIGHT_RED) + color("║", Colors.BRIGHT_BLUE))
+    print(color("╚══════════════════════════════════════════════════════════════╝", Colors.BRIGHT_BLUE))
     
-    options = [
-        "🔍 Buscar canciones por metadatos",
-        "🏷️ Buscar por ISRC específico",
-        "📥 Descargar por ISRC",
-        "🎧 Reproducir canción",
-        "🌐 Buscar en servicios de música",
-        "📁 Navegador de archivos avanzado",
-        "🔄 Verificar actualizaciones",
-        "⚙️ Instalar herramientas",
-        "📊 Estadísticas de biblioteca",
-        "🎯 Búsqueda inteligente",
-        "❌ Salir"
-    ]
-    
-    for i, option in enumerate(options, 1):
-        print(color(f"{i}. {option}", Colors.BOLD))
-    
-    print()
-    choice = input("Selecciona una opción: ").strip()
-    
-    # Verificar si hay actualizaciones antes de procesar la opción
     if updater.update_available and not updater.notification_shown:
-        updater.show_update_notification()
+        print(color(f"   🔔 ¡Actualización disponible! v{updater.new_version} - Ejecuta opción 7", Colors.BRIGHT_GREEN))
     
-    return choice
+    return input("\nSelecciona una opción: ").strip()
 
-# ===== FUNCIONES DEL MENÚ PRINCIPAL =====
-def search_by_metadata_menu():
-    clear()
-    print(color("🔎 Búsqueda por Metadatos", Colors.BOLD))
-    print("Deja vacío cualquier campo para ignorarlo.")
-    
-    filters = {
-        'title': input("Título: ").strip(),
-        'artist': input("Artista: ").strip(),
-        'album': input("Álbum: .strip()"),
-        'isrc': input("ISRC: ").strip(),
-    }
-    
-    print("\nSelecciona el directorio a buscar:")
-    directory = advanced_file_browser()
-    if directory is None:
-        return
-    
-    if not os.path.isdir(directory):
-        print(color("❌ El directorio no existe.", Colors.BRIGHT_RED))
-        time.sleep(2)
-        return
-    
-    print(color("⏳ Buscando canciones...", Colors.BRIGHT_CYAN))
-    found = filter_songs(directory, filters)
-    
-    if found:
-        print(color(f"\n🎶 Se encontraron {len(found)} canciones:", Colors.BRIGHT_GREEN))
-        for i, song in enumerate(found, 1):
-            print(color(f"{i}.", Colors.WHITE))
-            display_audio_info(song)
-        
-        play = input("¿Reproducir alguna? Número o Enter para omitir: ").strip()
-        if play.isdigit() and 1 <= int(play) <= len(found):
-            play_song(found[int(play)-1]['file'])
-    else:
-        print(color("❌ No se encontraron canciones con esos filtros.", Colors.BRIGHT_RED))
-    
-    input("\n⏎ Enter para continuar...")
-
-def search_by_isrc_menu():
-    clear()
-    print(color("🏷️ Búsqueda por ISRC", Colors.BOLD))
-    
-    isrc_code = input("Introduce el código ISRC: ").strip().upper()
-    if not re.match(r'^[A-Z]{2}[A-Z0-9]{3}\d{5}$', isrc_code):
-        print(color("❌ Formato ISRC inválido.", Colors.BRIGHT_RED))
-        time.sleep(2)
-        return
-    
-    print("\nSelecciona el directorio a buscar:")
-    directory = advanced_file_browser()
-    if directory is None:
-        return
-    
-    if not os.path.isdir(directory):
-        print(color("❌ El directorio no existe.", Colors.BRIGHT_RED))
-        time.sleep(2)
-        return
-    
-    print(color("⏳ Buscando ISRC...", Colors.BRIGHT_CYAN))
-    found = search_isrc_in_directory(directory, isrc_code)
-    
-    if found:
-        print(color(f"\n✅ Se encontraron {len(found)} archivos con ISRC {isrc_code}:", Colors.BRIGHT_GREEN))
-        for i, song in enumerate(found, 1):
-            print(color(f"{i}.", Colors.WHITE))
-            display_audio_info(song)
-        
-        play = input("¿Reproducir alguna? Número o Enter para omitir: ").strip()
-        if play.isdigit() and 1 <= int(play) <= len(found):
-            play_song(found[int(play)-1]['file'])
-    else:
-        print(color(f"❌ No se encontraron archivos con ISRC {isrc_code}", Colors.BRIGHT_RED))
-        print(color("💡 Solo el 30-40% de las canciones suelen tener ISRC", Colors.BRIGHT_YELLOW))
-    
-    input("\n⏎ Enter para continuar...")
-
-def download_by_isrc_menu():
-    clear()
-    print(color("📥 Descargar por ISRC", Colors.BOLD))
-    
-    isrc_code = input("Introduce el código ISRC: ").strip().upper()
-    if not re.match(r'^[A-Z]{2}[A-Z0-9]{3}\d{5}$', isrc_code:
-        print(color("❌ Formato ISRC inválido.", Colors.BRIGHT_RED))
-        time.sleep(2)
-        return
-    
-    print("\nSelecciona el directorio de descarga:")
-    output_dir = advanced_file_browser()
-    if output_dir is None:
-        output_dir = "descargas_isrc"
-    
-    success, filename = download_by_isrc(isrc_code, output_dir)
-    if success:
-        print(color(f"✅ Descarga completada: {filename}", Colors.BRIGHT_GREEN))
-        
-        play = input("¿Reproducir descarga? (s/n): ").lower()
-        if play == 's':
-            play_song(filename)
-    else:
-        print(color("❌ No se pudo descargar el archivo.", Colors.BRIGHT_RED))
-    
-    input("\n⏎ Enter para continuar...")
-
-def play_song_menu():
-    clear()
-    print(color("🎧 Reproducir Canción", Colors.BOLD))
-    
-    print("Selecciona el archivo de audio:")
-    path = advanced_file_browser()
-    if path is None or not os.path.isfile(path):
-        print(color("❌ Archivo no válido.", Colors.BRIGHT_RED))
-        time.sleep(2)
-        return
-    
-    if not path.lower().endswith(SUPPORTED_AUDIO):
-        print(color("❌ Formato de audio no soportado.", Colors.BRIGHT_RED))
-        time.sleep(2)
-        return
-    
-    print(color("\n📋 Metadatos del archivo:", Colors.BRIGHT_CYAN))
-    info = extract_isrc_advanced(path)
-    display_audio_info(info)
-    
-    play_song(path)
-    input("\n⏎ Enter para continuar...")
-
-def external_search_menu():
-    clear()
-    print(color("🌐 Búsqueda en Servicios de Música", Colors.BOLD))
-    
-    query = input("Término de búsqueda: ").strip()
-    if not query:
-        print(color("❌ Debes introducir un término de búsqueda.", Colors.BRIGHT_RED))
-        time.sleep(2)
-        return
-    
-    service = input("Servicio (deezer/soundcloud/bandcamp/archive/all): ").strip().lower() or "all"
-    
-    results = search_music_services(query, service)
-    
-    if results:
-        for service_name, service_results in results.items():
-            print(color(f"🎵 Resultados de {service_name.capitalize()} ({len(service_results)}):", Colors.BRIGHT_GREEN))
-            for i, result in enumerate(service_results[:5], 1):
-                print(f"   {i}. {result}")
-            print()
-    else:
-        print(color("❌ No se encontraron resultados.", Colors.BRIGHT_RED))
-    
-    input("\n⏎ Enter para continuar...")
-
-def file_browser_menu():
-    clear()
-    print(color("📁 Navegador de Archivos Avanzado", Colors.BOLD))
-    
-    selected = advanced_file_browser()
-    if selected:
-        if os.path.isfile(selected):
-            print(color(f"\n📄 Archivo seleccionado: {selected}", Colors.BRIGHT_GREEN))
-            info = extract_isrc_advanced(selected, deep_scan=True)
-            display_audio_info(info, detailed=True)
-            
-            if selected.lower().endswith(SUPPORTED_AUDIO):
-                play = input("¿Reproducir? (s/n): ").lower()
-                if play == 's':
-                    play_song(selected)
-        else:
-            print(color(f"\n📂 Directorio seleccionado: {selected}", Colors.BRIGHT_GREEN))
-        
-        input("\n⏎ Enter para continuar...")
-
-def update_menu():
-    clear()
-    print(color("🔄 Sistema de Actualizaciones", Colors.BOLD))
-    
-    if updater.check_for_updates():
-        print(color(f"🎉 ¡Nueva versión disponible! v{updater.local_version} → v{updater.new_version}", Colors.BRIGHT_GREEN))
-        print(color(f"📅 Fecha de lanzamiento: {updater.update_info.get('release_date', 'Desconocida')}", Colors.BRIGHT_CYAN))
-        print(color(f"📋 Cambios:\n{updater.update_info.get('changelog', 'No disponible')}", Colors.WHITE))
-        
-        if updater.update_info.get('critical', False):
-            print(color("🚨 ACTUALIZACIÓN CRÍTICA: Se recomienda actualizar inmediatamente", Colors.BRIGHT_RED))
-        
-        if updater.update_info.get('message'):
-            print(color(f"💬 Mensaje: {updater.update_info['message']}", Colors.BRIGHT_CYAN))
-        
-        confirm = input("\n¿Actualizar ahora? (s/n): ").lower()
-        if confirm == 's':
-            print(color("⏳ Descargando actualización...", Colors.BRIGHT_YELLOW))
-            if updater.download_script_update():
-                print(color("✅ ¡Actualización completada!", Colors.BRIGHT_GREEN))
-                print(color("🔄 Reiniciando aplicación...", Colors.BRIGHT_CYAN))
-                time.sleep(2)
-                os.execv(sys.executable, [sys.executable] + sys.argv)
-            else:
-                print(color("❌ Error al descargar la actualización.", Colors.BRIGHT_RED))
-    else:
-        print(color("✅ Ya tienes la última versión.", Colors.BRIGHT_GREEN))
-        print(color("💡 El sistema verifica automáticamente cada 10 segundos", Colors.BRIGHT_YELLOW))
-    
-    input("\n⏎ Enter para continuar...")
-
-def tools_menu():
-    clear()
-    print(color("⚙️ Herramientas del Sistema", Colors.BOLD))
-    
-    print("1. Verificar/Instalar dependencias")
-    print("2. Verificar/Instalar FFmpeg (ffprobe, ffplay)")
-    print("3. Verificar conexión a internet")
-    print("4. Limpiar caché de búsquedas")
-    print("5. Ver información del sistema")
-    print("6. Volver")
-    
-    choice = input("\nSelecciona una opción: ").strip()
-    
-    if choice == "1":
-        print(color("🔍 Verificando dependencias...", Colors.BRIGHT_YELLOW))
-        check_dependencies()
-        input("\n⏎ Enter para continuar...")
-    elif choice == "2":
-        print(color("🔍 Verificando FFmpeg...", Colors.BRIGHT_YELLOW))
-        if check_ffprobe() and check_ffplay():
-            print(color("✅ FFmpeg ya está instalado.", Colors.BRIGHT_GREEN))
-        else:
-            install_ffmpeg_tools()
-        input("\n⏎ Enter para continuar...")
-    elif choice == "3":
-        print(color("🌐 Verificando conexión a internet...", Colors.BRIGHT_YELLOW))
-        try:
-            requests.get("https://www.google.com", timeout=5)
-            print(color("✅ Conexión a internet funcionando.", Colors.BRIGHT_GREEN))
-        except:
-            print(color("❌ Sin conexión a internet.", Colors.BRIGHT_RED))
-        input("\n⏎ Enter para continuar...")
-    elif choice == "4":
-        print(color("🗑️ Limpiando caché...", Colors.BRIGHT_YELLOW))
-        print(color("✅ Caché limpiado correctamente.", Colors.BRIGHT_GREEN))
-        input("\n⏎ Enter para continuar...")
-    elif choice == "5":
-        print(color("💻 Información del Sistema:", Colors.BOLD))
-        print(f"   Plataforma: {platform.system()} {platform.release()}")
-        print(f"   Procesador: {platform.processor()}")
-        print(f"   Python: {platform.python_version()}")
-        print(f"   Directorio actual: {os.getcwd()}")
-        input("\n⏎ Enter para continuar...")
-
-def library_stats_menu():
-    clear()
-    print(color("📊 Estadísticas de Biblioteca", Colors.BOLD))
-    
-    print("Selecciona el directorio a analizar:")
-    directory = advanced_file_browser()
-    if directory is None:
-        return
-    
-    if not os.path.isdir(directory):
-        print(color("❌ El directorio no existe.", Colors.BRIGHT_RED))
-        time.sleep(2)
-        return
-    
-    print(color("⏳ Analizando biblioteca musical...", Colors.BRIGHT_CYAN))
-    
-    audio_files = []
-    for root, _, files in os.walk(directory):
-        for file in files:
-            if file.lower().endswith(SUPPORTED_AUDIO):
-                audio_files.append(os.path.join(root, file))
-    
-    total_files = len(audio_files)
-    if total_files == 0:
-        print(color("❌ No se encontraron archivos de audio.", Colors.BRIGHT_RED))
-        input("\n⏎ Enter para continuar...")
-        return
-    
-    has_isrc = 0
-    has_cover = 0
-    quality_scores = []
-    total_duration = 0
-    total_size = 0
-    artists = set()
-    albums = set()
-    genres = set()
-    years = set()
-    
-    for i, file_path in enumerate(audio_files, 1):
-        print(color(f"   Analizando {i}/{total_files}: {os.path.basename(file_path)[:30]}...", Colors.BRIGHT_YELLOW), end="\r")
-        info = extract_isrc_advanced(file_path)
-        
-        if info.get('isrc'):
-            has_isrc += 1
-        if info.get('has_cover'):
-            has_cover += 1
-        if info.get('quality_rating'):
-            quality_scores.append(info['quality_rating'])
-        if info.get('duration'):
-            total_duration += info['duration']
-        if info.get('size'):
-            total_size += info['size']
-        if info.get('artist'):
-            artists.add(info['artist'])
-        if info.get('album'):
-            albums.add(info['album'])
-        if info.get('genre'):
-            genres.add(info['genre'])
-        if info.get('year'):
-            years.add(info['year'])
-    
-    print()
-    
-    avg_quality = sum(quality_scores) / len(quality_scores) if quality_scores else 0
-    isrc_percentage = (has_isrc / total_files) * 100
-    cover_percentage = (has_cover / total_files) * 100
-    
-    print(color("\n📊 ESTADÍSTICAS DE LA BIBLIOTECA:", Colors.BOLD))
-    print(f"   📁 {color('Archivos totales:', Colors.BOLD)} {total_files}")
-    print(f"   🏷️  {color('Con ISRC:', Colors.BOLD)} {has_isrc} ({isrc_percentage:.1f}%)")
-    print(f"   🖼️  {color('Con portada:', Colors.BOLD)} {has_cover} ({cover_percentage:.1f}%)")
-    print(f"   ⭐ {color('Calidad promedio:', Colors.BOLD)} {avg_quality:.1f}%")
-    print(f"   ⏱️  {color('Duración total:', Colors.BOLD)} {int(total_duration // 3600)}h {int((total_duration % 3600) // 60)}m")
-    print(f"   📦 {color('Tamaño total:', Colors.BOLD)} {total_size / (1024**3):.2f} GB")
-    print(f"   🎤 {color('Artistas únicos:', Colors.BOLD)} {len(artists)}")
-    print(f"   💿 {color('Álbumes únicos:', Colors.BOLD)} {len(albums)}")
-    print(f"   🎼 {color('Géneros únicos:', Colors.BOLD)} {len(genres)}")
-    print(f"   📅 {color('Años únicos:', Colors.BOLD)} {len(years)}")
-    
-    if isrc_percentage < 50:
-        print(color("\n💡 ¿Por qué tan pocos ISRC?", Colors.BRIGHT_YELLOW))
-        print(color("   Solo el 30-40% de las canciones suelen tener ISRC", Colors.BRIGHT_YELLOW))
-    
-    input("\n⏎ Enter para continuar...")
-
-def smart_search_menu():
-    clear()
-    print(color("🎯 Búsqueda Inteligente", Colors.BOLD))
-    print("Encuentra canciones incluso sin información completa")
-    
-    print("\n1. Buscar por fragmento de letra o título")
-    print("2. Identificar canción por muestra de audio")
-    print("3. Encontrar versiones alternativas")
-    print("4. Detectar duplicados")
-    print("5. Volver")
-    
-    choice = input("\nSelecciona una opción: ").strip()
-    
-    if choice == "1":
-        print(color("🔍 Búsqueda por fragmento", Colors.BRIGHT_YELLOW))
-        fragment = input("Introduce un fragmento de título o letra: ").strip()
-        if fragment:
-            print(color("⏳ Buscando coincidencias...", Colors.BRIGHT_CYAN))
-            time.sleep(2)
-            print(color("✅ Función en desarrollo. Próximamente en actualizaciones futuras.", Colors.BRIGHT_GREEN))
-        else:
-            print(color("❌ Debes introducir un fragmento para buscar.", Colors.BRIGHT_RED))
-        input("\n⏎ Enter para continuar...")
-    elif choice == "2":
-        print(color("🎵 Identificación por audio", Colors.BRIGHT_YELLOW))
-        print(color("🔊 Graba un fragmento de la canción o selecciona un archivo", Colors.BRIGHT_CYAN))
-        time.sleep(2)
-        print(color("✅ Función en desarrollo. Próximamente en actualizaciones futuras.", Colors.BRIGHT_GREEN))
-        input("\n⏎ Enter para continuar...")
-    elif choice == "3":
-        print(color("🔄 Búsqueda de versiones alternativas", Colors.BRIGHT_YELLOW))
-        print("Selecciona una canción para encontrar versiones:")
-        song_path = advanced_file_browser()
-        if song_path and os.path.isfile(song_path):
-            info = extract_isrc_advanced(song_path)
-            print(color(f"🔍 Buscando versiones de: {info.get('title', 'Unknown')}", Colors.BRIGHT_CYAN))
-            time.sleep(2)
-            print(color("✅ Función en desarrollo. Próximamente en actualizaciones futuras.", Colors.BRIGHT_GREEN))
-        input("\n⏎ Enter para continuar...")
-    elif choice == "4":
-        print(color("🔍 Detección de duplicados", Colors.BRIGHT_YELLOW))
-        print("Selecciona directorio para buscar duplicados:")
-        directory = advanced_file_browser()
-        if directory and os.path.isdir(directory):
-            print(color("⏳ Buscando duplicados...", Colors.BRIGHT_CYAN))
-            time.sleep(2)
-            print(color("✅ Función en desarrollo. Próximamente en actualizaciones futuras.", Colors.BRIGHT_GREEN))
-        input("\n⏎ Enter para continuar...")
-
-# ===== MAIN =====
 def main():
+    """Función principal del programa"""
+    # Verificar dependencias
     if not check_dependencies():
-        print(color("❌ No se pudieron instalar las dependencias necesarias.", Colors.BRIGHT_RED))
-        input("Presiona Enter para salir...")
+        print(color("❌ No se pudieron instalar las dependencias necesarias", Colors.RED))
         return
     
+    # Verificar herramientas FFmpeg
+    if not check_ffprobe():
+        print(color("⚠️  FFprobe no está disponible. Algunas funciones estarán limitadas.", Colors.YELLOW))
+        install_ffmpeg_tools()
+    
+    # Iniciar verificador de actualizaciones en segundo plano
     updater.start_update_checker()
     
-    while True:
-        try:
-            option = main_menu()
+    # Verificar actualizaciones al inicio
+    updater.check_for_updates(silent=True)
+    
+    try:
+        while True:
+            choice = show_menu()
             
-            if option == "1":
-                search_by_metadata_menu()
-            elif option == "2":
-                search_by_isrc_menu()
-            elif option == "3":
-                download_by_isrc_menu()
-            elif option == "4":
-                play_song_menu()
-            elif option == "5":
-                external_search_menu()
-            elif option == "6":
-                file_browser_menu()
-            elif option == "7":
-                update_menu()
-            elif option == "8":
-                tools_menu()
-            elif option == "9":
-                library_stats_menu()
-            elif option == "10":
-                smart_search_menu()
-            elif option == "11":
-                print(color("👋 ¡Hasta pronto!", Colors.BRIGHT_CYAN))
+            if choice == "1":
+                # Buscar ISRC en archivo individual
+                file_path = input("Introduce la ruta del archivo: ").strip()
+                if os.path.isfile(file_path):
+                    info = extract_isrc_advanced(file_path, deep_scan=True)
+                    clear()
+                    display_audio_info(info, detailed=True)
+                    input("\nPresiona Enter para continuar...")
+                else:
+                    print(color("❌ Archivo no encontrado", Colors.RED))
+                    time.sleep(1)
+            
+            elif choice == "2":
+                # Buscar ISRC en directorio
+                directory = input("Introduce la ruta del directorio: ").strip()
+                if os.path.isdir(directory):
+                    process_directory(directory)
+                else:
+                    print(color("❌ Directorio no encontrado", Colors.RED))
+                    time.sleep(1)
+            
+            elif choice == "3":
+                # Buscar ISRC en múltiples directorios
+                directories = input("Introduce las rutas separadas por coma: ").strip().split(',')
+                for dir_path in directories:
+                    dir_path = dir_path.strip()
+                    if os.path.isdir(dir_path):
+                        process_directory(dir_path)
+                    else:
+                        print(color(f"❌ Directorio no encontrado: {dir_path}", Colors.RED))
+                        time.sleep(1)
+            
+            elif choice == "4":
+                # Explorador de archivos avanzado
+                start_dir = input("Directorio inicial (Enter para actual): ").strip()
+                if not start_dir:
+                    start_dir = "."
+                selected_dir = advanced_file_browser(start_dir)
+                if selected_dir:
+                    print(color(f"📁 Directorio seleccionado: {selected_dir}", Colors.GREEN))
+                    process_directory(selected_dir)
+            
+            elif choice == "5":
+                # Analizar calidad de metadatos
+                directory = input("Introduce la ruta del directorio: ").strip()
+                if os.path.isdir(directory):
+                    analyze_metadata_quality(directory)
+                else:
+                    print(color("❌ Directorio no encontrado", Colors.RED))
+                    time.sleep(1)
+            
+            elif choice == "6":
+                # Buscar canciones similares
+                file_path = input("Introduce la ruta del archivo de referencia: ").strip()
+                if os.path.isfile(file_path):
+                    directory = input("Directorio donde buscar similares: ").strip()
+                    if not directory:
+                        directory = os.path.dirname(file_path)
+                    
+                    if os.path.isdir(directory):
+                        ref_info = extract_isrc_advanced(file_path)
+                        similar_songs = search_similar_songs(directory, ref_info)
+                        
+                        clear()
+                        print(color("🎵 CANCIONES SIMILARES ENCONTRADAS:", Colors.BRIGHT_BLUE))
+                        for song, similarity in similar_songs[:10]:
+                            print(f"   {color(f'{similarity}%', Colors.BRIGHT_GREEN)} - {song.get('title', 'Unknown')} - {song.get('artist', 'Unknown')}")
+                        input("\nPresiona Enter para continuar...")
+                    else:
+                        print(color("❌ Directorio no encontrado", Colors.RED))
+                        time.sleep(1)
+                else:
+                    print(color("❌ Archivo no encontrado", Colors.RED))
+                    time.sleep(1)
+            
+            elif choice == "7":
+                # Verificar actualizaciones manualmente
+                clear()
+                print(color("🔍 Buscando actualizaciones...", Colors.YELLOW))
+                if updater.check_for_updates(silent=False):
+                    print(color("✅ ¡Estás al día!", Colors.GREEN))
+                else:
+                    print(color("❌ Error al verificar actualizaciones", Colors.RED))
+                time.sleep(2)
+            
+            elif choice == "8":
+                # Configuración
+                show_settings()
+            
+            elif choice == "9":
+                # Salir
+                print(color("👋 ¡Hasta pronto!", Colors.BRIGHT_GREEN))
                 updater.stop_update_checker()
                 break
+            
             else:
-                print(color("❌ Opción inválida.", Colors.BRIGHT_RED))
+                print(color("❌ Opción no válida", Colors.RED))
                 time.sleep(1)
-        except KeyboardInterrupt:
-            print(color("\n👋 ¡Hasta pronto!", Colors.BRIGHT_CYAN))
-            updater.stop_update_checker()
+    
+    except KeyboardInterrupt:
+        print(color("\n👋 ¡Hasta pronto!", Colors.BRIGHT_GREEN))
+        updater.stop_update_checker()
+
+def process_directory(directory):
+    """Procesa un directorio buscando ISRC en archivos de audio"""
+    print(color(f"🔍 Buscando archivos de audio en: {directory}", Colors.CYAN))
+    
+    audio_files = []
+    for root, _, files in os.walk(directory):
+        for file in files:
+            if file.lower().endswith(SUPPORTED_AUDIO):
+                audio_files.append(os.path.join(root, file))
+    
+    if not audio_files:
+        print(color("❌ No se encontraron archivos de audio", Colors.RED))
+        time.sleep(1)
+        return
+    
+    print(color(f"📊 Encontrados {len(audio_files)} archivos de audio", Colors.GREEN))
+    
+    results = []
+    total = len(audio_files)
+    
+    for i, file_path in enumerate(audio_files, 1):
+        print(color(f"   Analizando {i}/{total}: {os.path.basename(file_path)[:30]}...", Colors.YELLOW), end="\r")
+        info = extract_isrc_advanced(file_path)
+        results.append(info)
+    
+    print()
+    
+    # Mostrar resultados
+    clear()
+    print(color("📊 RESULTADOS DEL ANÁLISIS:", Colors.BRIGHT_BLUE))
+    print(color("=" * 120, Colors.BRIGHT_CYAN))
+    
+    found_count = sum(1 for r in results if r['isrc'])
+    print(color(f"📈 Archivos con ISRC: {found_count}/{total} ({found_count/total*100:.1f}%)", 
+                Colors.BRIGHT_GREEN if found_count/total > 0.5 else Colors.BRIGHT_YELLOW))
+    
+    # Estadísticas de calidad
+    quality_scores = [r['quality_rating'] for r in results]
+    avg_quality = sum(quality_scores) / len(quality_scores) if quality_scores else 0
+    print(color(f"📊 Calidad promedio de metadatos: {avg_quality:.1f}%", 
+                Colors.BRIGHT_GREEN if avg_quality > 60 else Colors.BRIGHT_YELLOW if avg_quality > 30 else Colors.BRIGHT_RED))
+    
+    print(color("=" * 120, Colors.BRIGHT_CYAN))
+    
+    # Mostrar detalles
+    for i, result in enumerate(results, 1):
+        isrc_color = Colors.BRIGHT_GREEN if result['isrc'] else Colors.BRIGHT_RED
+        isrc_text = result['isrc'] or "No encontrado"
+        
+        print(f"{i:3d}. {result['filename'][:40]:40} | "
+              f"ISRC: {color(isrc_text, isrc_color):15} | "
+              f"Artista: {result.get('artist', '?')[:20]:20} | "
+              f"Título: {result.get('title', '?')[:25]:25}")
+    
+    input("\nPresiona Enter para continuar...")
+
+def analyze_metadata_quality(directory):
+    """Analiza la calidad de los metadatos en un directorio"""
+    print(color(f"📊 Analizando calidad de metadatos en: {directory}", Colors.CYAN))
+    
+    audio_files = []
+    for root, _, files in os.walk(directory):
+        for file in files:
+            if file.lower().endswith(SUPPORTED_AUDIO):
+                audio_files.append(os.path.join(root, file))
+    
+    if not audio_files:
+        print(color("❌ No se encontraron archivos de audio", Colors.RED))
+        time.sleep(1)
+        return
+    
+    results = []
+    total = len(audio_files)
+    
+    for i, file_path in enumerate(audio_files, 1):
+        print(color(f"   Analizando {i}/{total}: {os.path.basename(file_path)[:30]}...", Colors.YELLOW), end="\r")
+        info = extract_isrc_advanced(file_path)
+        results.append(info)
+    
+    print()
+    
+    # Calcular estadísticas
+    quality_scores = [r['quality_rating'] for r in results]
+    avg_quality = sum(quality_scores) / len(quality_scores) if quality_scores else 0
+    
+    has_isrc = sum(1 for r in results if r['isrc'])
+    has_title = sum(1 for r in results if r['title'])
+    has_artist = sum(1 for r in results if r['artist'])
+    has_album = sum(1 for r in results if r['album'])
+    has_cover = sum(1 for r in results if r['has_cover'])
+    
+    clear()
+    print(color("📊 ESTADÍSTICAS DE CALIDAD DE METADATOS:", Colors.BRIGHT_BLUE))
+    print(color("=" * 80, Colors.BRIGHT_CYAN))
+    print(f"📁 Directorio: {directory}")
+    print(f"🎵 Archivos analizados: {total}")
+    print(color("=" * 80, Colors.BRIGHT_CYAN))
+    
+    print(f"🏆 {color('Calidad promedio:', Colors.BOLD)} {color(f'{avg_quality:.1f}%', Colors.BRIGHT_GREEN if avg_quality > 60 else Colors.BRIGHT_YELLOW if avg_quality > 30 else Colors.BRIGHT_RED)}")
+    print(f"📊 {color('Distribución por calidad:', Colors.BOLD)}")
+    
+    # Histograma de calidad
+    quality_ranges = [(90, 100), (70, 89), (50, 69), (30, 49), (0, 29)]
+    for min_q, max_q in quality_ranges:
+        count = sum(1 for r in results if min_q <= r['quality_rating'] <= max_q)
+        percentage = count / total * 100
+        bar = "█" * int(percentage / 5)
+        color_code = (
+            Colors.BRIGHT_GREEN if min_q >= 70 else
+            Colors.BRIGHT_YELLOW if min_q >= 50 else
+            Colors.BRIGHT_RED
+        )
+        print(f"   {min_q:2d}-{max_q:2d}%: {bar:<20} {count:3d} ({percentage:5.1f}%) {color('█' * int(percentage/5), color_code)}")
+    
+    print(color("=" * 80, Colors.BRIGHT_CYAN))
+    print(f"🏷️  {color('Metadatos específicos:', Colors.BOLD)}")
+    print(f"   📍 ISRC: {has_isrc:3d} ({has_isrc/total*100:5.1f}%)")
+    print(f"   🎵 Título: {has_title:3d} ({has_title/total*100:5.1f}%)")
+    print(f"   🎤 Artista: {has_artist:3d} ({has_artist/total*100:5.1f}%)")
+    print(f"   💿 Álbum: {has_album:3d} ({has_album/total*100:5.1f}%)")
+    print(f"   🖼️  Portada: {has_cover:3d} ({has_cover/total*100:5.1f}%)")
+    
+    # Top 5 archivos con mejor calidad
+    best_quality = sorted(results, key=lambda x: x['quality_rating'], reverse=True)[:5]
+    print(color("=" * 80, Colors.BRIGHT_CYAN))
+    print(f"🏅 {color('Top 5 - Mejor calidad:', Colors.BOLD)}")
+    for i, item in enumerate(best_quality, 1):
+        print(f"   {i}. {item['filename'][:30]:30} - {item['quality_rating']:3.0f}%")
+    
+    # Top 5 archivos con peor calidad
+    worst_quality = sorted(results, key=lambda x: x['quality_rating'])[:5]
+    print(color("=" * 80, Colors.BRIGHT_CYAN))
+    print(f"🔻 {color('Top 5 - Peor calidad:', Colors.BOLD)}")
+    for i, item in enumerate(worst_quality, 1):
+        print(f"   {i}. {item['filename'][:30]:30} - {item['quality_rating']:3.0f}%")
+    
+    input("\nPresiona Enter para continuar...")
+
+def show_settings():
+    """Muestra el menú de configuración"""
+    while True:
+        clear()
+        print(color("⚙️  CONFIGURACIÓN:", Colors.BRIGHT_BLUE))
+        print(color("=" * 50, Colors.BRIGHT_CYAN))
+        print("1. Ver información del sistema")
+        print("2. Verificar herramientas FFmpeg")
+        print("3. Instalar herramientas FFmpeg")
+        print("4. Ver información de la versión")
+        print("5. Volver al menú principal")
+        print(color("=" * 50, Colors.BRIGHT_CYAN))
+        
+        choice = input("Selecciona una opción: ").strip()
+        
+        if choice == "1":
+            clear()
+            print(color("💻 INFORMACIÓN DEL SISTEMA:", Colors.BRIGHT_BLUE))
+            print(color("=" * 50, Colors.BRIGHT_CYAN))
+            print(f"Plataforma: {PLATFORM_LABEL}")
+            print(f"Python: {platform.python_version()}")
+            print(f"Sistema: {platform.system()} {platform.release()}")
+            print(f"Procesador: {platform.processor()}")
+            print(f"Directorio actual: {os.getcwd()}")
+            input("\nPresiona Enter para continuar...")
+        
+        elif choice == "2":
+            clear()
+            print(color("🔧 ESTADO DE HERRAMIENTAS FFMPEG:", Colors.BRIGHT_BLUE))
+            print(color("=" * 50, Colors.BRIGHT_CYAN))
+            print(f"FFprobe: {'✅ Disponible' if check_ffprobe() else '❌ No disponible'}")
+            print(f"FFplay: {'✅ Disponible' if check_ffplay() else '❌ No disponible'}")
+            input("\nPresiona Enter para continuar...")
+        
+        elif choice == "3":
+            install_ffmpeg_tools()
+            input("\nPresiona Enter para continuar...")
+        
+        elif choice == "4":
+            clear()
+            print(color("📋 INFORMACIÓN DE VERSIÓN:", Colors.BRIGHT_BLUE))
+            print(color("=" * 50, Colors.BRIGHT_CYAN))
+            print(f"Versión actual: {updater.local_version}")
+            if updater.update_info:
+                if 'release_date' in updater.update_info:
+                    print(f"Fecha de lanzamiento: {updater.update_info['release_date']}")
+                if 'changelog' in updater.update_info:
+                    print(f"Cambios: {updater.update_info['changelog'][:100]}...")
+            input("\nPresiona Enter para continuar...")
+        
+        elif choice == "5":
             break
-        except Exception as e:
-            print(color(f"❌ Error inesperado: {e}", Colors.BRIGHT_RED))
-            time.sleep(2)
+        
+        else:
+            print(color("❌ Opción no válida", Colors.RED))
+            time.sleep(1)
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        print(color(f"❌ Error crítico: {e}", Colors.RED))
+        import traceback
+        traceback.print_exc()
+        input("Presiona Enter para salir...")
