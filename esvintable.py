@@ -598,7 +598,7 @@ def file_explorer(start_path='.'):
         print(color("+" + "="*70 + "+", Colors.BRIGHT_BLUE))
 
         print(color(f"📁 {current}", Colors.BRIGHT_CYAN))
-        print(color(f"Atajos: ↑↓ mover  Enter abrir  Backspace subir  / buscar  m marcar  p previsualizar  l lista  x exportar  h historial  q salir", Colors.YELLOW))
+        print(color(f"Atajos: ↑↓ mover  Enter abrir  Backspace subir  g ir ruta  / buscar  m marcar  p previsualizar  l lista  x exportar  h historial  q salir", Colors.YELLOW))
         print()
 
         if not entries:
@@ -653,19 +653,22 @@ def file_explorer(start_path='.'):
                 else:
                     return sel['path']
             elif k == readchar.key.BACKSPACE:
-                if len(stack) > 1:
-                    stack.pop()
+                parent = os.path.dirname(current)
+                if parent:
+                    stack.append(parent)
+                    index = 0
+            elif k.lower() == 'g':
+                path = input('Ruta destino: ').strip()
+                if os.path.isdir(path):
+                    stack.append(os.path.abspath(path))
                     index = 0
             elif k.lower() == 'q':
                 return None
             elif k == '/':
-                # buscar
-                print()
                 txt = input('Filtro (vacío para quitar): ').strip()
                 filter_text = txt if txt else None
                 index = 0
             elif k.lower() == 'h':
-                # historial
                 if history:
                     print(color('Historial:', Colors.BRIGHT_CYAN))
                     for i, h in enumerate(reversed(history[-10:]), 1):
@@ -679,7 +682,6 @@ def file_explorer(start_path='.'):
                     except Exception:
                         pass
             elif k.lower() == 'm':
-                # marcar/desmarcar
                 if entries:
                     path = entries[index]['path']
                     if path in marked:
@@ -689,7 +691,6 @@ def file_explorer(start_path='.'):
             elif k.lower() == 'l':
                 detailed = not detailed
             elif k.lower() == 'p':
-                # previsualizar ~ intenta ffplay
                 if entries and entries[index]['type']=='file':
                     path = entries[index]['path']
                     print(color('Reproduciendo 10s (ffplay si disponible)...', Colors.BRIGHT_YELLOW))
@@ -699,7 +700,6 @@ def file_explorer(start_path='.'):
                         print(color('ffplay no disponible o error reproduciendo.', Colors.RED))
                         time.sleep(1)
             elif k.lower() == 'x':
-                # exportar marcado o actual
                 sel_list = list(marked) if marked else ([entries[index]['path']] if entries else [])
                 if sel_list:
                     out = input('Archivo JSON de salida (Enter para seleccion.json): ').strip() or 'seleccion.json'
@@ -722,20 +722,22 @@ def file_explorer(start_path='.'):
                     except Exception as e:
                         print(color(f'Error exportando: {e}', Colors.RED))
                     input('Enter para continuar...')
-            else:
-                # captura otras teclas ignoradas
-                pass
         else:
-            # Fallback basado en input tradicional
             print('\nListado:')
             for i, e in enumerate(entries, 1):
                 print(f"{i}. {e['name']}{'/' if e['type']=='dir' else ''}")
-            choice = input("Selecciona número (número, /buscar, m=marcar, x=exportar, b=volver, q=salir): ").strip().lower()
+            choice = input("Selecciona número (número, g ruta, /buscar, m=marcar, x=exportar, b=volver, q=salir): ").strip().lower()
             if choice == 'q':
                 return None
             if choice == 'b':
-                if len(stack) > 1:
-                    stack.pop()
+                parent = os.path.dirname(current)
+                if parent:
+                    stack.append(parent)
+                continue
+            if choice == 'g':
+                path = input('Ruta destino: ').strip()
+                if os.path.isdir(path):
+                    stack.append(os.path.abspath(path))
                 continue
             if choice == '/':
                 txt = input('Filtro (vacío para quitar): ').strip()
