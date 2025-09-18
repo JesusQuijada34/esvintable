@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# esVintable - Multiplataforma (versión mejorada)
+# esVintable - Multiplataforma (versión mejorada con fingerprinting y búsquedas adicionales)
 # Autor original: @JesusQuijada34 | GitHub.com/JesusQuijada34/esvintable
-# Esta versión restaura la API, añade explorador interactivo, búsquedas (Spotify/Qobuz/iTunes/Deezer), emojis,
-# notificador que reemplaza el script y details.xml, y navegación por teclado (fallback a números).
 
 import os
 import sys
@@ -35,8 +33,14 @@ DETAILS_XML_URL = f"{REPO_RAW_URL}details.xml"
 LOCAL_XML_FILE = "details.xml"
 UPDATE_INTERVAL = 10
 
-# Token original (si necesitas rotarlo, cámbialo en config)
+# Token original (no sobrescribimos el token interno; puedes usar ESVINTABLE_TOKEN para cambiarlo)
 TOKEN = os.environ.get('ESVINTABLE_TOKEN', "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIxODkyNDQ0MDEiLCJkZXZpY2VJZCI6IjE1NDAyNjIyMCIsInRyYW5zYWN0aW9uSWQiOiJhcGlfZXN2aW50YWJsZSJ9.VM4mKjhrUguvQ0l6wHgFfW6v6m8yF_8jO3wT6jLxQwo")
+
+# API keys/config variables (usa variables de entorno o un config.json si lo prefieres)
+SPOTIFY_CLIENT_ID = ''
+SPOTIFY_CLIENT_SECRET = ''
+ACOUSTID_KEY = ''
+SOUNDCLOUD_CLIENT_ID = ''
 
 PROVIDERS = [
     'Warner', 'Orchard', 'SonyMusic', 'UMG', 'INgrooves', 'Fuga', 'Vydia', 'Empire',
@@ -214,6 +218,11 @@ def ensure_dependencies():
             missing.append(dep)
     if READCHAR_AVAILABLE is False:
         missing.append('readchar')
+    # acoustid/chromaprint optional for fingerprinting
+    try:
+        import acoustid  # type: ignore
+    except Exception:
+        missing.append('pyacoustid')
     if missing:
         print(color("Instalando dependencias faltantes...", Colors.YELLOW))
         try:
@@ -250,6 +259,7 @@ def extract_isrc(file_path):
                         if isinstance(val, list):
                             val = val[0]
                         result['isrc'] = str(val).strip().upper()
+                        result['method'] = f'metadata:{key}'
                         break
                 except Exception:
                     continue
@@ -273,7 +283,7 @@ def extract_isrc(file_path):
     except Exception as e:
         result['error'] = str(e)
     # Si no hay ISRC, intentar análisis binario rápido
-    if not result['isrc']:
+    if not result.get('isrc'):
         try:
             with open(file_path, 'rb') as f:
                 data = f.read(150000)
@@ -285,6 +295,69 @@ def extract_isrc(file_path):
                         result['method'] = 'binary-scan'
         except Exception:
             pass
+    return result
+
+# ===== FINGERPRINT (AcoustID / Chromaprint) =====
+def fingerprint_and_lookup(file_path, acoustid_key=None):
+    """Genera huella acústica (fpcalc o pyacoustid) y consulta AcoustID/MusicBrainz para intentar obtener ISRC.
+    Retorna un diccionario con posibles coincidencias y campos encontrados (isrc, title, artist, mbid).
+    """
+    result = {'source':'acoustid','matches':[], 'error':None}
+    # Intentar usar fpcalc (parte de Chromaprint)
+    fp = None
+    duration = None
+    try:
+        proc = subprocess.run(['fpcalc', '-json', file_path], capture_output=True, text=True, timeout=20)
+        if proc.returncode == 0 and proc.stdout:
+            import json as _json
+            data = _json.loads(proc.stdout)
+            fp = data.get('fingerprint')
+            duration = int(data.get('duration', 0))
+    except Exception:
+        # intentar con pyacoustid
+        try:
+            import acoustid as _ac
+            fp, duration = _ac.fingerprint_file(file_path)
+        except Exception:
+            pass
+
+    if not fp or not duration:
+        result['error'] = 'No se pudo generar huella acústica (instala fpcalc o pyacoustid)'
+        return result
+
+    acoustid_key = acoustid_key or ACOUSTID_KEY or os.environ.get('ACOUSTID_KEY')
+    if not acoustid_key:
+        result['error'] = 'No ACOUSTID_KEY configurada (usa ACOUSTID_KEY env var)'
+        return result
+
+    try:
+        params = {
+            'client': acoustid_key,
+            'fingerprint': fp,
+            'duration': duration,
+            'meta': 'recordings+releases+releasegroups+isrcs'
+        }
+        r = requests.get('https://api.acoustid.org/v2/lookup', params=params, timeout=15)
+        if r.status_code == 200:
+            data = r.json()
+            for score_item in data.get('results', []):
+                for rec in score_item.get('recordings', []):
+                    entry = {'score': score_item.get('score'), 'title': rec.get('title'), 'artists': [a.get('name') for a in rec.get('artists', [])], 'isrcs': rec.get('isrcs', []) if rec.get('isrcs') else []}
+                    mbid = rec.get('id')
+                    if not entry['isrcs'] and mbid:
+                        try:
+                            mbr = requests.get(f'https://musicbrainz.org/ws/2/recording/{mbid}', params={'inc':'isrcs','fmt':'json'}, timeout=10, headers={'User-Agent':'esvintable/1.0 (https://github.com/JesusQuijada34)'} )
+                            if mbr.status_code == 200:
+                                mr = mbr.json()
+                                isrcs = mr.get('isrcs', [])
+                                entry['isrcs'] = isrcs
+                        except Exception:
+                            pass
+                    result['matches'].append(entry)
+        else:
+            result['error'] = f'AcoustID lookup failed: {r.status_code}'
+    except Exception as e:
+        result['error'] = str(e)
     return result
 
 # ===== EXPLORADOR DE ARCHIVOS INTERACTIVO =====
@@ -349,6 +422,9 @@ def file_explorer(start_path='.'):
                 return None
         else:
             # Fallback: input numérico
+            print('\nListado:')
+            for i, e in enumerate(entries, 1):
+                print(f"{i}. {e['name']}{'/' if e['type']=='dir' else ''}")
             choice = input("Selecciona número (número, b=volver, q=salir): ").strip().lower()
             if choice == 'q':
                 return None
@@ -371,8 +447,8 @@ def file_explorer(start_path='.'):
 # ===== BÚSQUEDAS ONLINE =====
 # Spotify: usa Client Credentials si se definen variables de entorno
 def spotify_search(query, limit=5):
-    client_id = os.environ.get('SPOTIFY_CLIENT_ID')
-    client_secret = os.environ.get('SPOTIFY_CLIENT_SECRET')
+    client_id = SPOTIFY_CLIENT_ID
+    client_secret = SPOTIFY_CLIENT_SECRET
     if not client_id or not client_secret:
         print(color("⚠️ Spotify: define SPOTIFY_CLIENT_ID y SPOTIFY_CLIENT_SECRET en variables de entorno para búsquedas.", Colors.YELLOW))
         return []
@@ -401,7 +477,6 @@ def qobuz_search(query, limit=8):
         r = scraper.get(url, timeout=10)
         if r.status_code == 200:
             html = r.text
-            # búsqueda simple de títulos (no 100% fiable)
             matches = re.findall(r'"trackTitle"\s*:\s*"([^"]+)"', html)
             results = []
             for m in matches[:limit]:
@@ -441,14 +516,36 @@ def deezer_search(query, limit=8):
         pass
     return []
 
+# SoundCloud search (requiere client id en variable SOUNDCLOUD_CLIENT_ID)
+def soundcloud_search(query, limit=8):
+    client = SOUNDCLOUD_CLIENT_ID
+    if not client:
+        print(color('⚠️ SoundCloud: define SOUNDCLOUD_CLIENT_ID en variables de entorno para búsquedas.', Colors.YELLOW))
+        return []
+    try:
+        url = 'https://api-v2.soundcloud.com/search/tracks'
+        params = {'q': query, 'limit': limit, 'client_id': client}
+        r = requests.get(url, params=params, timeout=10)
+        if r.status_code == 200:
+            data = r.json()
+            results = []
+            for t in data.get('collection', [])[:limit]:
+                results.append({'source':'soundcloud','type':'track','name':t.get('title'),'artist':t.get('user',{}).get('username')})
+            return results
+    except Exception:
+        pass
+    return []
+
 # Función unificadora de búsqueda online
 def unified_search(query):
     print(color(f"🔎 Buscando: {query}", Colors.BRIGHT_CYAN))
     results = []
-    results.extend(spotify_search(query) if os.environ.get('SPOTIFY_CLIENT_ID') else [])
+    if SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET:
+        results.extend(spotify_search(query))
     results.extend(qobuz_search(query))
     results.extend(itunes_search(query))
     results.extend(deezer_search(query))
+    results.extend(soundcloud_search(query))
     # Eliminar duplicados por (source,name,artist)
     seen = set()
     unique = []
@@ -494,9 +591,9 @@ def list_audio_files(directory):
 
 # ===== MENÚ TUI / CLI =====
 MAIN_MENU = [
-    {'key':'1','label':'🔍 Buscar ISRC en archivo','fn':'search_isrc_file'},
+    {'key':'1','label':'🔍 Extraer ISRC (metadatos + fingerprint)','fn':'search_isrc_file'},
     {'key':'2','label':'📁 Explorador interactivo','fn':'explorer'},
-    {'key':'3','label':'🌐 Búsqueda online (Spotify/Qobuz/iTunes/Deezer)','fn':'online_search'},
+    {'key':'3','label':'🌐 Búsqueda online (Spotify/Qobuz/iTunes/Deezer/SoundCloud)','fn':'online_search'},
     {'key':'4','label':'⬇️ Descargar por ISRC','fn':'download_isrc'},
     {'key':'5','label':'📂 Listar archivos de audio en directorio','fn':'list_dir'},
     {'key':'6','label':'🔔 Verificar actualizaciones','fn':'check_updates'},
@@ -540,7 +637,6 @@ def run_menu():
             choice = input('Selecciona opción (número o q): ').strip().lower()
             if choice == 'q':
                 break
-            # permitir también elegir por tecla
             matched = next((i for i, it in enumerate(MAIN_MENU) if it['key'] == choice), None)
             if matched is not None:
                 if not dispatch(MAIN_MENU[matched]['fn']):
@@ -549,20 +645,9 @@ def run_menu():
                 print(color('Opción inválida', Colors.RED))
                 time.sleep(1)
 
-# Dispatcher de funciones
-def dispatch(name):
-    if name == 'search_isrc_file':
-        path = file_explorer('.')
-        if path:
-            info = extract_isrc(path)
-            display_file_info(info)
-            if info.get('isrc'):
-                d = input('🔄 Descargar por ISRC? (s/n): ').strip().lower()
-                if d == 's':
-                    download_by_isrc(info['isrc'], os.path.dirname(path))
-        input('Enter para continuar...')
-        return True
-    elif name == 'explorer':
+# Dispatcher de funciones (base)
+def dispatch_base(name):
+    if name == 'explorer':
         path = file_explorer('.')
         if path:
             print(color(f"Seleccionado: {path}", Colors.BRIGHT_CYAN))
@@ -617,10 +702,38 @@ def dispatch(name):
         return False
     return True
 
+# Dispatcher extendido que maneja fingerprint + base
+def dispatch(name):
+    if name == 'search_isrc_file':
+        path = file_explorer('.')
+        if path:
+            # primero extraer metadatos
+            info = extract_isrc(path)
+            display_file_info(info)
+            # si no tiene isrc, intentar fingerprint
+            if not info.get('isrc'):
+                print(color('🔊 Intentando identificación por huella acústica...', Colors.BRIGHT_YELLOW))
+                res = fingerprint_and_lookup(path, acoustid_key=ACOUSTID_KEY)
+                if res.get('matches'):
+                    for m in res['matches']:
+                        print(color(f"Score: {m.get('score')} - {m.get('title')} — {', '.join(m.get('artists',[]))}", Colors.BRIGHT_CYAN))
+                        if m.get('isrcs'):
+                            print(color('ISRCs encontradas: ' + ', '.join(m.get('isrcs')), Colors.BRIGHT_GREEN))
+                else:
+                    print(color('No se encontró coincidencia acústica.', Colors.RED))
+            if info.get('isrc'):
+                d = input('🔄 Descargar por ISRC? (s/n): ').strip().lower()
+                if d == 's':
+                    download_by_isrc(info['isrc'], os.path.dirname(path))
+        input('Enter para continuar...')
+        return True
+    else:
+        return dispatch_base(name)
+
 # ===== PUNTO DE ENTRADA =====
 def main():
     if not ensure_dependencies():
-        print(color('No se pudieron instalar dependencias. Ejecuta manualmente pip install readchar requests cloudscraper mutagen', Colors.RED))
+        print(color('No se pudieron instalar dependencias. Ejecuta manualmente pip install readchar requests cloudscraper mutagen pyacoustid', Colors.RED))
         return
     updater.start_update_checker()
     updater.check_for_updates(silent=True)
