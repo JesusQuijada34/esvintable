@@ -633,7 +633,7 @@ MAIN_MENU = [
     {'key':'3','label':'🌐 Búsqueda online (Spotify/Qobuz/iTunes/Deezer/SoundCloud)','fn':'online_search'},
     {'key':'4','label':'⬇️ Descargar por ISRC','fn':'download_isrc'},
     {'key':'5','label':'📂 Listar archivos de audio en directorio','fn':'list_dir'},
-    {'key':'6','label':'🔔 Verificar actualizaciones (forzar)','fn':'check_updates'},
+    {'key':'6','label':'🔔 Verificar actualizaciones (forzable)','fn':'check_updates'},
     {'key':'7','label':'⚙️ Forzar redescubrimiento SoundCloud client_id','fn':'discover_sc'},
     {'key':'8','label':'❌ Salir','fn':'exit'}
 ]
