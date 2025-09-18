@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# esVintable Lite - Multiplataforma (versión extendida con más funciones)
+# esVintable Lite - Multiplataforma (versión extendida con más funciones y API restaurada)
 # Autor original: @JesusQuijada34 | GitHub.com/JesusQuijada34/esvintable
 
 import os
@@ -25,7 +25,9 @@ SCRIPT_FILENAME = "esvintable_lite.py"
 DETAILS_XML_URL = f"{REPO_RAW_URL}details.xml"
 LOCAL_XML_FILE = "details.xml"
 UPDATE_INTERVAL = 10
-TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."  # truncado
+
+# ⚠️ Token API restaurado (mantener seguro, no compartir públicamente)
+TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIxODkyNDQ0MDEiLCJkZXZpY2VJZCI6IjE1NDAyNjIyMCIsInRyYW5zYWN0aW9uSWQiOiJhcGlfZXN2aW50YWJsZSJ9.VM4mKjhrUguvQ0l6wHgFfW6v6m8yF_8jO3wT6jLxQwo"
 
 PROVIDERS = [
     'Warner', 'Orchard', 'SonyMusic', 'UMG', 'INgrooves', 'Fuga', 'Vydia', 'Empire',
