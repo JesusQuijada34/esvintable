@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# esVintable - Multiplataforma (versión final con descubrimiento de SoundCloud client_id)
-# Autor original: @JesusQuijada34 | GitHub.com/JesusQuijada34/esvintable
+# esVintable - Versión completa con actualizador mejorado
+# Autor original: @JesusQuijada34 (modificado por ti)
+# NOTA: Rellena el bloque de configuración más abajo antes de usar.
 
 import os
 import sys
@@ -26,26 +27,28 @@ try:
 except Exception:
     READCHAR_AVAILABLE = False
 
-# ===== CONFIGURACIÓN DE CLAVES (ponlas aquí directamente) =====
-ACOUSTID_KEY = "87NqIfCkj8"  # e.g. "ABCD-1234..."
-SPOTIFY_CLIENT_ID = "7edce1fd97734d2e9588c975e57f5e87"
-SPOTIFY_CLIENT_SECRET = "51c9fcff27154bb499064ce38ae7e8dc"
-SOUNDCLOUD_CLIENT_ID = ""  # si la dejas vacía, el script intentará descubrirla por scraping
-ESVINTABLE_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIxODkyNDQ0MDEiLCJkZXZpY2VJZCI6IjE1NDAyNjIyMCIsInRyYW5zYWN0aW9uSWQiOiJhcGlfZXN2aW50YWJsZSJ9.VM4mKjhrUguvQ0l6wHgFfW6v6m8yF_8jO3wT6jLxQwo"
+# ===== BLOQUE DE CONFIGURACIÓN (edítalo aquí) =====
+ACOUSTID_KEY = ""              # Ej: "ABCD-1234-..." (recomendado para fingerprinting)
+SPOTIFY_CLIENT_ID = ""         # Opcional (para búsquedas Spotify)
+SPOTIFY_CLIENT_SECRET = ""     # Opcional (para búsquedas Spotify)
+SOUNDCLOUD_CLIENT_ID = ""      # Si lo dejas vacío el script intentará autodescubrirlo
+TOKEN = ""                     # Tu token privado para descargas por ISRC (si lo tienes)
+# ====================================================
 
-# Compatibilidad: usar variables internas por defecto
+# Compatibilidad: si quieres aún leer variables de entorno, las respetamos si no están en el script
 SPOTIFY_CLIENT_ID = SPOTIFY_CLIENT_ID or os.environ.get('SPOTIFY_CLIENT_ID','')
 SPOTIFY_CLIENT_SECRET = SPOTIFY_CLIENT_SECRET or os.environ.get('SPOTIFY_CLIENT_SECRET','')
 ACOUSTID_KEY = ACOUSTID_KEY or os.environ.get('ACOUSTID_KEY','')
 SOUNDCLOUD_CLIENT_ID = SOUNDCLOUD_CLIENT_ID or os.environ.get('SOUNDCLOUD_CLIENT_ID','')
-TOKEN = ESVINTABLE_TOKEN or os.environ.get('ESVINTABLE_TOKEN','')
+TOKEN = TOKEN or os.environ.get('ESVINTABLE_TOKEN','')
 
 # ===== CONFIG GLOBAL =====
 REPO_RAW_URL = "https://raw.githubusercontent.com/JesusQuijada34/esvintable/main/"
 SCRIPT_FILENAME = "esvintable.py"
 DETAILS_XML_URL = f"{REPO_RAW_URL}details.xml"
 LOCAL_XML_FILE = "details.xml"
-UPDATE_INTERVAL = 10
+UPDATE_INTERVAL = 30  # segundos entre chequeos automáticos
+FORCE_UPDATER_NAME = "esvintable_force_update.py"
 
 PROVIDERS = [
     'Warner', 'Orchard', 'SonyMusic', 'UMG', 'INgrooves', 'Fuga', 'Vydia', 'Empire',
@@ -86,15 +89,13 @@ class Colors:
     BRIGHT_BLUE = '\033[38;5;21m'
     BRIGHT_CYAN = '\033[38;5;87m'
 
-
 def color(text, color_code):
     return f"{color_code}{text}{Colors.END}"
-
 
 def clear():
     os.system('cls' if IS_WINDOWS else 'clear')
 
-# ===== SISTEMA DE ACTUALIZACIÓN (igual que antes) =====
+# ===== SISTEMA DE ACTUALIZACIÓN MEJORADO =====
 class UpdateChecker:
     def __init__(self):
         self.last_check = datetime.now()
@@ -117,24 +118,172 @@ class UpdateChecker:
                 if version_element is not None:
                     self.local_version = version_element.text.strip()
                     return True
-        except:
+        except Exception:
             pass
         self.local_version = "0.0"
         return False
 
-    def get_remote_info_from_xml(self):
+    def fetch_remote_xml(self):
         try:
-            response = requests.get(DETAILS_XML_URL, timeout=10)
-            if response.status_code == 200:
-                root = ET.fromstring(response.content)
-                info = {}
-                info['version'] = root.find('version').text.strip() if root.find('version') is not None else self.local_version
-                info['changelog'] = root.find('changelog').text.strip() if root.find('changelog') is not None else ""
-                info['critical'] = (root.find('critical').text.strip().lower() == 'true') if root.find('critical') is not None else False
-                info['message'] = root.find('message').text.strip() if root.find('message') is not None else ""
-                return info
+            r = requests.get(DETAILS_XML_URL, timeout=15)
+            if r.status_code == 200:
+                return r.text
         except Exception:
             return None
+
+    def parse_remote_info(self, xml_text):
+        try:
+            root = ET.fromstring(xml_text)
+            info = {}
+            info['version'] = root.find('version').text.strip() if root.find('version') is not None else self.local_version
+            info['changelog'] = root.find('changelog').text.strip() if root.find('changelog') is not None else ""
+            info['critical'] = (root.find('critical').text.strip().lower() == 'true') if root.find('critical') is not None else False
+            info['message'] = root.find('message').text.strip() if root.find('message') is not None else ""
+            return info
+        except Exception:
+            return None
+
+    def safe_write_file(self, path, content, binary=False):
+        tmp = path + '.tmp'
+        mode = 'wb' if binary else 'w'
+        enc = None if binary else 'utf-8'
+        try:
+            # Ensure parent dir exists
+            parent = os.path.dirname(path)
+            if parent and not os.path.exists(parent):
+                os.makedirs(parent, exist_ok=True)
+            with open(tmp, mode, encoding=enc) as f:
+                f.write(content)
+            os.replace(tmp, path)
+            return True
+        except Exception as e:
+            try:
+                if os.path.exists(tmp):
+                    os.remove(tmp)
+            except Exception:
+                pass
+            print(color(f'Error escribiendo {path}: {e}', Colors.RED))
+            return False
+
+    def download_script_and_xml(self):
+        script_url = f"{REPO_RAW_URL}{SCRIPT_FILENAME}"
+        xml_text = self.fetch_remote_xml()
+        script_text = None
+        try:
+            r = requests.get(script_url, timeout=20)
+            if r.status_code == 200:
+                script_text = r.text
+        except Exception as e:
+            print(color(f'Error descargando script remoto: {e}', Colors.YELLOW))
+        return script_text, xml_text
+
+    def create_force_updater(self, script_text, xml_text):
+        """Crea un script de respaldo que fuerza la escritura de files si el reemplazo normal falla."""
+        try:
+            force_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), FORCE_UPDATER_NAME)
+            payload = f"""#!/usr/bin/env python3
+# Script force updater creado por esvintable
+import os, sys, time
+script_path = {repr(os.path.abspath(__file__))}
+try:
+    # Escribir details.xml
+    xml = {repr(xml_text)}
+    if xml:
+        with open(os.path.join(os.path.dirname(script_path),'details.xml'), 'w', encoding='utf-8') as xf:
+            xf.write(xml)
+    # Escribir script
+    code = {repr(script_text)}
+    if code:
+        with open(script_path, 'w', encoding='utf-8') as sf:
+            sf.write(code)
+    print('Force update aplicado.')
+except Exception as e:
+    print('Force update fallo:', e)
+    sys.exit(2)
+# Reiniciar
+try:
+    time.sleep(0.5)
+    os.execv(sys.executable, [sys.executable, script_path])
+except Exception:
+    pass
+"""
+            with open(force_path, 'w', encoding='utf-8') as f:
+                f.write(payload)
+            try:
+                os.chmod(force_path, 0o755)
+            except Exception:
+                pass
+            return force_path
+        except Exception as e:
+            print(color(f'No se pudo crear force updater: {e}', Colors.YELLOW))
+            return None
+
+    def apply_update(self, script_text, xml_text):
+        """Intenta aplicar actualización: escribe details.xml y el script remoto de forma atómica.
+        Si falla, crea un script adicional para forzar el reemplazo.
+        Luego intenta reiniciar el proceso.
+        """
+        script_path = os.path.abspath(__file__)
+        # backups
+        try:
+            with open(script_path, 'r', encoding='utf-8') as orig:
+                orig_code = orig.read()
+        except Exception:
+            orig_code = None
+        try:
+            if xml_text:
+                if not self.safe_write_file(LOCAL_XML_FILE, xml_text, binary=False):
+                    print(color('No se pudo escribir details.xml de forma segura.', Colors.YELLOW))
+            if script_text:
+                # intentar escribir script remoto
+                if not self.safe_write_file(script_path, script_text, binary=False):
+                    print(color('Escritura directa del script falló, creando force updater...', Colors.YELLOW))
+                    force_path = self.create_force_updater(script_text, xml_text)
+                    if force_path:
+                        print(color(f'Run {force_path} to force the update.', Colors.BRIGHT_YELLOW))
+                        try:
+                            subprocess.Popen([sys.executable, force_path])
+                        except Exception:
+                            pass
+                    return False
+                else:
+                    # escrito correctamente: reiniciar
+                    print(color('Script actualizado correctamente. Reiniciando...', Colors.BRIGHT_GREEN))
+                    time.sleep(0.8)
+                    os.execv(sys.executable, [sys.executable] + sys.argv)
+        except Exception as e:
+            print(color(f'Error applying update: {e}', Colors.RED))
+            self.create_force_updater(script_text, xml_text)
+            return False
+        return True
+
+    def check_for_updates(self, silent=False):
+        try:
+            xml_text = self.fetch_remote_xml()
+            if not xml_text:
+                return False
+            info = self.parse_remote_info(xml_text)
+            if not info:
+                return False
+            self.update_info = info
+            self.remote_version = info.get('version')
+            if self.compare_versions(self.local_version, self.remote_version):
+                self.update_available = True
+                self.new_version = self.remote_version
+                if not silent and not self.notification_shown:
+                    print(color(f"\n🔔 ¡Actualización disponible! v{self.new_version} — {self.update_info.get('message','')}", Colors.BRIGHT_GREEN))
+                    self.notification_shown = True
+                    # descargar script y xml
+                    script_text, xml_text = self.download_script_and_xml()
+                    # aplicar actualización
+                    performed = self.apply_update(script_text, xml_text)
+                    if not performed:
+                        print(color('La actualización no pudo completarse automáticamente. Revisa el archivo force updater.', Colors.YELLOW))
+                    return True
+        except Exception as e:
+            if not silent:
+                print(color(f"Error actualizaciones: {e}", Colors.RED))
+        return False
 
     def compare_versions(self, local_ver, remote_ver):
         try:
@@ -143,55 +292,6 @@ class UpdateChecker:
             return remote_parts > local_parts
         except Exception:
             return remote_ver > local_ver
-
-    def download_xml_update(self):
-        try:
-            response = requests.get(DETAILS_XML_URL, timeout=10)
-            if response.status_code == 200:
-                with open(LOCAL_XML_FILE, 'wb') as f:
-                    f.write(response.content)
-                return True
-        except Exception:
-            return False
-
-    def download_script_update(self):
-        try:
-            script_url = f"{REPO_RAW_URL}{SCRIPT_FILENAME}"
-            response = requests.get(script_url, timeout=20)
-            if response.status_code == 200:
-                # backup
-                script_path = os.path.abspath(__file__)
-                with open(script_path + '.backup', 'w', encoding='utf-8') as b:
-                    with open(script_path, 'r', encoding='utf-8') as orig:
-                        b.write(orig.read())
-                with open(script_path, 'w', encoding='utf-8') as f:
-                    f.write(response.text)
-                return True
-        except Exception:
-            return False
-
-    def check_for_updates(self, silent=False):
-        try:
-            self.update_info = self.get_remote_info_from_xml()
-            if self.update_info and 'version' in self.update_info:
-                self.remote_version = self.update_info['version']
-                if self.compare_versions(self.local_version, self.remote_version):
-                    self.update_available = True
-                    self.new_version = self.remote_version
-                    if not silent and not self.notification_shown:
-                        print(color(f"\n🔔 ¡Actualización disponible! v{self.new_version} — {self.update_info.get('message','')}", Colors.BRIGHT_GREEN))
-                        self.notification_shown = True
-                        if self.download_xml_update():
-                            print(color("📄 details.xml actualizado.", Colors.BRIGHT_CYAN))
-                        if self.download_script_update():
-                            print(color("🛠️  Script actualizado. Reiniciando...", Colors.BRIGHT_GREEN))
-                            time.sleep(1)
-                            os.execv(sys.executable, [sys.executable] + sys.argv)
-                    return True
-        except Exception as e:
-            if not silent:
-                print(color(f"Error actualizaciones: {e}", Colors.RED))
-        return False
 
     def start_update_checker(self):
         def checker_thread():
@@ -226,7 +326,7 @@ def ensure_dependencies():
     except Exception:
         missing.append('pyacoustid')
     if missing:
-        print(color("Instalando dependencias faltantes...", Colors.YELLOW))
+        print(color("Instalando dependencias faltantes... (esto puede tardar)", Colors.YELLOW))
         try:
             subprocess.run([sys.executable, "-m", "pip", "install"] + missing, check=True)
             print(color("✅ Dependencias instaladas.", Colors.BRIGHT_GREEN))
@@ -302,7 +402,7 @@ def fingerprint_and_lookup(file_path, acoustid_key=None):
     fp = None
     duration = None
     try:
-        proc = subprocess.run(['fpcalc', '-json', file_path], capture_output=True, text=True, timeout=20)
+        proc = subprocess.run(['fpcalc', '-json', file_path], capture_output=True, text=True, timeout=30)
         if proc.returncode == 0 and proc.stdout:
             import json as _json
             data = _json.loads(proc.stdout)
@@ -321,7 +421,7 @@ def fingerprint_and_lookup(file_path, acoustid_key=None):
 
     acoustid_key = acoustid_key or ACOUSTID_KEY
     if not acoustid_key:
-        result['error'] = 'No ACOUSTID_KEY configurada (put it in the script)'
+        result['error'] = 'No ACOUSTID_KEY configurada (ponla en el script)'
         return result
 
     try:
@@ -361,9 +461,7 @@ def fingerprint_and_lookup(file_path, acoustid_key=None):
 
 # ===== FUNCIONALIDAD: descubrir SoundCloud client_id por scraping =====
 def discover_soundcloud_client_id(timeout=10, max_scripts=30):
-    """Intenta descubrir automáticamente un client_id válido de SoundCloud mediante scraping de su página
-    y de los archivos JavaScript referenciados. Retorna client_id o None.
-    """
+    """Intenta descubrir automáticamente un client_id válido de SoundCloud."""
     global SOUNDCLOUD_CLIENT_ID
     if SOUNDCLOUD_CLIENT_ID:
         return SOUNDCLOUD_CLIENT_ID
@@ -376,17 +474,18 @@ def discover_soundcloud_client_id(timeout=10, max_scripts=30):
         r = scraper.get('https://soundcloud.com', timeout=timeout)
         text = r.text if r.status_code == 200 else ''
 
+        # patrones simples
         patterns = [
-            r'client_id\\s*[:=]\\s*"([a-zA-Z0-9_-]{8,})"',
-            r'client_id\\s*[:=]\\s*'"'"'([a-zA-Z0-9_-]{8,})'"'"'',
+            r'client_id\s*[:=]\s*"([a-zA-Z0-9_-]{8,})"',
             r'client_id=([a-zA-Z0-9_-]{8,})',
-            r'client_id\\"\\:\\"([a-zA-Z0-9_-]{8,})\\"',
+            r'client_id\\\":\\\"([a-zA-Z0-9_-]{8,})\\\"',
         ]
         for pat in patterns:
             for m in re.finditer(pat, text):
                 candidates.add(m.group(1))
 
-        script_urls = re.findall(r'<script[^>]+src=["\']([^"\']+)["\']', text)
+        # extraer scripts y comprobarlos
+        script_urls = re.findall(r'<script[^>]+src=[\"\\']([^\"\\']+)[\"\\']', text)
         count = 0
         for s in script_urls:
             if count >= max_scripts:
@@ -406,7 +505,7 @@ def discover_soundcloud_client_id(timeout=10, max_scripts=30):
             except Exception:
                 continue
 
-        # Validar candidates comprobando que sirven en una llamada simple a la API
+        # validar candidates con una petición de prueba
         for cid in list(candidates):
             try:
                 test = scraper.get('https://api-v2.soundcloud.com/tracks', params={'q':'test','limit':1,'client_id':cid}, timeout=8)
@@ -426,6 +525,7 @@ def discover_soundcloud_client_id(timeout=10, max_scripts=30):
 # ===== EXPLORADOR DE ARCHIVOS INTERACTIVO =====
 def file_explorer(start_path='.'):
     current = os.path.abspath(start_path)
+
     def list_dir(path):
         try:
             items = os.listdir(path)
@@ -439,6 +539,7 @@ def file_explorer(start_path='.'):
             elif os.path.isfile(full) and name.lower().endswith(SUPPORTED_AUDIO):
                 entries.append({'type':'file','name':name,'path':full})
         return entries
+
     index = 0
     stack = [current]
     while True:
@@ -447,6 +548,7 @@ def file_explorer(start_path='.'):
         entries = list_dir(current)
         print(color(f"📁 Explorador: {current}", Colors.BRIGHT_CYAN))
         print(color("(Usa ↑↓ para navegar, Enter para abrir/seleccionar, Backspace para subir, q para salir)", Colors.YELLOW))
+
         if not entries:
             print(color("  -- vacío --", Colors.BRIGHT_RED))
         for i, e in enumerate(entries):
@@ -456,6 +558,7 @@ def file_explorer(start_path='.'):
                 print(color(display, Colors.BRIGHT_GREEN))
             else:
                 print(display)
+
         if READCHAR_AVAILABLE:
             k = readchar.readkey()
             if k == readchar.key.UP:
@@ -505,7 +608,7 @@ def spotify_search(query, limit=5):
     client_id = SPOTIFY_CLIENT_ID
     client_secret = SPOTIFY_CLIENT_SECRET
     if not client_id or not client_secret:
-        print(color("⚠️ Spotify: define SPOTIFY_CLIENT_ID y SPOTIFY_CLIENT_SECRET en el script para búsquedas.", Colors.YELLOW))
+        print(color("⚠️ Spotify: configura SPOTIFY_CLIENT_ID y SPOTIFY_CLIENT_SECRET en el script para búsquedas.", Colors.YELLOW))
         return []
     data = {'grant_type':'client_credentials'}
     r = requests.post('https://accounts.spotify.com/api/token', data=data, auth=(client_id, client_secret), timeout=10)
@@ -571,7 +674,6 @@ def soundcloud_search(query, limit=8):
     global SOUNDCLOUD_CLIENT_ID
     client = SOUNDCLOUD_CLIENT_ID
     if not client:
-        # intentar autodescubrimiento
         cid = discover_soundcloud_client_id()
         if cid:
             client = cid
@@ -618,7 +720,7 @@ def download_by_isrc(isrc, output_dir="descargas_isrc"):
     for provider in PROVIDERS:
         try:
             url = f"https://mds.projectcarmen.com/stream/download?provider={provider}&isrc={isrc}"
-            headers = {"Authorization": f"Bearer {TOKEN}"}
+            headers = {"Authorization": f"Bearer {TOKEN}"} if TOKEN else {}
             response = scraper.get(url, headers=headers, timeout=20)
             if response.status_code == 200 and len(response.content) > 1000:
                 filename = os.path.join(output_dir, f"{isrc}_{provider}.m4a")
@@ -643,6 +745,16 @@ def list_audio_files(directory):
                 out.append(os.path.join(root, file))
     return out
 
+def display_file_info(info):
+    isrc_text = info.get('isrc', 'No encontrado')
+    isrc_color = Colors.BRIGHT_GREEN if info.get('isrc') else Colors.BRIGHT_RED
+    print(color(f"Archivo: {info.get('filename')}", Colors.CYAN))
+    print(f"   ISRC: {color(isrc_text, isrc_color)}")
+    print(f"   Artista: {info.get('artist', 'Desconocido')}")
+    print(f"   Título: {info.get('title', 'Desconocido')}")
+    if 'method' in info:
+        print(f"   Método: {info['method']}")
+
 # ===== MENÚ TUI / CLI =====
 MAIN_MENU = [
     {'key':'1','label':'🔍 Extraer ISRC (metadatos + fingerprint)','fn':'search_isrc_file'},
@@ -650,13 +762,14 @@ MAIN_MENU = [
     {'key':'3','label':'🌐 Búsqueda online (Spotify/Qobuz/iTunes/Deezer/SoundCloud)','fn':'online_search'},
     {'key':'4','label':'⬇️ Descargar por ISRC','fn':'download_isrc'},
     {'key':'5','label':'📂 Listar archivos de audio en directorio','fn':'list_dir'},
-    {'key':'6','label':'🔔 Verificar actualizaciones','fn':'check_updates'},
-    {'key':'7','label':'❌ Salir','fn':'exit'}
+    {'key':'6','label':'🔔 Verificar actualizaciones (forzar)','fn':'check_updates'},
+    {'key':'7','label':'⚙️ Forzar redescubrimiento SoundCloud client_id','fn':'discover_sc'},
+    {'key':'8','label':'❌ Salir','fn':'exit'}
 ]
 
 def print_banner():
     print(color("============================================", Colors.BRIGHT_BLUE))
-    print(color(f" 🎵 ESVINTABLE v{updater.local_version} - {PLATFORM_LABEL}", Colors.BRIGHT_GREEN))
+    print(color(f" 🎵 ESVINTABLE - {PLATFORM_LABEL}", Colors.BRIGHT_GREEN))
     print(color("============================================", Colors.BRIGHT_BLUE))
 
 def print_menu(selected_index=0):
@@ -696,8 +809,7 @@ def run_menu():
                 print(color('Opción inválida', Colors.RED))
                 time.sleep(1)
 
-# Dispatcher base and extended implemented below
-
+# Dispatcher: acciones del menú
 def dispatch_base(name):
     if name == 'explorer':
         path = file_explorer('.')
@@ -748,6 +860,32 @@ def dispatch_base(name):
         return True
     elif name == 'check_updates':
         updater.check_for_updates(silent=False)
+        input('Enter para continuar...')
+        return True
+    elif name == 'discover_sc':
+        print(color("Forzando autodescubrimiento SoundCloud client_id...", Colors.BRIGHT_YELLOW))
+        cid = discover_soundcloud_client_id()
+        if cid:
+            print(color(f"client_id descubierto: {cid}", Colors.BRIGHT_GREEN))
+            try:
+                cfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'esvintable_config.json')
+                # Guardar en config (opcional)
+                import json
+                cfg = {}
+                if os.path.exists(cfg_path):
+                    try:
+                        with open(cfg_path, 'r', encoding='utf-8') as cf:
+                            cfg = json.load(cf)
+                    except Exception:
+                        cfg = {}
+                cfg['SOUNDCLOUD_CLIENT_ID'] = cid
+                with open(cfg_path, 'w', encoding='utf-8') as cf:
+                    json.dump(cfg, cf, indent=2)
+                print(color(f"Guardado en {cfg_path}", Colors.BRIGHT_CYAN))
+            except Exception:
+                pass
+        else:
+            print(color("No se pudo descubrir client_id.", Colors.RED))
         input('Enter para continuar...')
         return True
     elif name == 'exit':
