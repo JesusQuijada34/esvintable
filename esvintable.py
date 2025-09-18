@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# esVintable - Multiplataforma (versión mejorada con fingerprinting y búsquedas adicionales)
+# esVintable - Multiplataforma (versión final con descubrimiento de SoundCloud client_id)
 # Autor original: @JesusQuijada34 | GitHub.com/JesusQuijada34/esvintable
 
 import os
@@ -26,21 +26,26 @@ try:
 except Exception:
     READCHAR_AVAILABLE = False
 
-# ===== CONFIGURACIÓN GLOBAL =====
+# ===== CONFIGURACIÓN DE CLAVES (ponlas aquí directamente) =====
+ACOUSTID_KEY = "87NqIfCkj8"  # e.g. "ABCD-1234..."
+SPOTIFY_CLIENT_ID = "7edce1fd97734d2e9588c975e57f5e87"
+SPOTIFY_CLIENT_SECRET = "51c9fcff27154bb499064ce38ae7e8dc"
+SOUNDCLOUD_CLIENT_ID = ""  # si la dejas vacía, el script intentará descubrirla por scraping
+ESVINTABLE_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIxODkyNDQ0MDEiLCJkZXZpY2VJZCI6IjE1NDAyNjIyMCIsInRyYW5zYWN0aW9uSWQiOiJhcGlfZXN2aW50YWJsZSJ9.VM4mKjhrUguvQ0l6wHgFfW6v6m8yF_8jO3wT6jLxQwo"
+
+# Compatibilidad: usar variables internas por defecto
+SPOTIFY_CLIENT_ID = SPOTIFY_CLIENT_ID or os.environ.get('SPOTIFY_CLIENT_ID','')
+SPOTIFY_CLIENT_SECRET = SPOTIFY_CLIENT_SECRET or os.environ.get('SPOTIFY_CLIENT_SECRET','')
+ACOUSTID_KEY = ACOUSTID_KEY or os.environ.get('ACOUSTID_KEY','')
+SOUNDCLOUD_CLIENT_ID = SOUNDCLOUD_CLIENT_ID or os.environ.get('SOUNDCLOUD_CLIENT_ID','')
+TOKEN = ESVINTABLE_TOKEN or os.environ.get('ESVINTABLE_TOKEN','')
+
+# ===== CONFIG GLOBAL =====
 REPO_RAW_URL = "https://raw.githubusercontent.com/JesusQuijada34/esvintable/main/"
 SCRIPT_FILENAME = "esvintable.py"
 DETAILS_XML_URL = f"{REPO_RAW_URL}details.xml"
 LOCAL_XML_FILE = "details.xml"
 UPDATE_INTERVAL = 10
-
-# Token original (no sobrescribimos el token interno; puedes usar ESVINTABLE_TOKEN para cambiarlo)
-TOKEN = os.environ.get('ESVINTABLE_TOKEN', "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIxODkyNDQ0MDEiLCJkZXZpY2VJZCI6IjE1NDAyNjIyMCIsInRyYW5zYWN0aW9uSWQiOiJhcGlfZXN2aW50YWJsZSJ9.VM4mKjhrUguvQ0l6wHgFfW6v6m8yF_8jO3wT6jLxQwo")
-
-# API keys/config variables (usa variables de entorno o un config.json si lo prefieres)
-SPOTIFY_CLIENT_ID = ''
-SPOTIFY_CLIENT_SECRET = ''
-ACOUSTID_KEY = '87NqIfCkj8'
-SOUNDCLOUD_CLIENT_ID = ''
 
 PROVIDERS = [
     'Warner', 'Orchard', 'SonyMusic', 'UMG', 'INgrooves', 'Fuga', 'Vydia', 'Empire',
@@ -89,7 +94,7 @@ def color(text, color_code):
 def clear():
     os.system('cls' if IS_WINDOWS else 'clear')
 
-# ===== SISTEMA DE ACTUALIZACIÓN =====
+# ===== SISTEMA DE ACTUALIZACIÓN (igual que antes) =====
 class UpdateChecker:
     def __init__(self):
         self.last_check = datetime.now()
@@ -174,10 +179,8 @@ class UpdateChecker:
                     self.update_available = True
                     self.new_version = self.remote_version
                     if not silent and not self.notification_shown:
-                        # Notificador con emoji
                         print(color(f"\n🔔 ¡Actualización disponible! v{self.new_version} — {self.update_info.get('message','')}", Colors.BRIGHT_GREEN))
                         self.notification_shown = True
-                        # Reemplazar details.xml y script para mayor estabilidad
                         if self.download_xml_update():
                             print(color("📄 details.xml actualizado.", Colors.BRIGHT_CYAN))
                         if self.download_script_update():
@@ -218,7 +221,6 @@ def ensure_dependencies():
             missing.append(dep)
     if READCHAR_AVAILABLE is False:
         missing.append('readchar')
-    # acoustid/chromaprint optional for fingerprinting
     try:
         import acoustid  # type: ignore
     except Exception:
@@ -251,7 +253,6 @@ def extract_isrc(file_path):
         elif file_path.lower().endswith(('.m4a', '.mp4')):
             audiofile = MP4(file_path)
         if audiofile:
-            # Buscar ISRC en campos comunes
             for key in ('isrc', 'TSRC'):
                 try:
                     if key in audiofile:
@@ -263,7 +264,6 @@ def extract_isrc(file_path):
                         break
                 except Exception:
                     continue
-            # Artista y título
             for art in ('artist','ARTIST','©ART'):
                 if art in audiofile:
                     try:
@@ -282,7 +282,6 @@ def extract_isrc(file_path):
                         pass
     except Exception as e:
         result['error'] = str(e)
-    # Si no hay ISRC, intentar análisis binario rápido
     if not result.get('isrc'):
         try:
             with open(file_path, 'rb') as f:
@@ -299,11 +298,7 @@ def extract_isrc(file_path):
 
 # ===== FINGERPRINT (AcoustID / Chromaprint) =====
 def fingerprint_and_lookup(file_path, acoustid_key=None):
-    """Genera huella acústica (fpcalc o pyacoustid) y consulta AcoustID/MusicBrainz para intentar obtener ISRC.
-    Retorna un diccionario con posibles coincidencias y campos encontrados (isrc, title, artist, mbid).
-    """
     result = {'source':'acoustid','matches':[], 'error':None}
-    # Intentar usar fpcalc (parte de Chromaprint)
     fp = None
     duration = None
     try:
@@ -314,7 +309,6 @@ def fingerprint_and_lookup(file_path, acoustid_key=None):
             fp = data.get('fingerprint')
             duration = int(data.get('duration', 0))
     except Exception:
-        # intentar con pyacoustid
         try:
             import acoustid as _ac
             fp, duration = _ac.fingerprint_file(file_path)
@@ -325,9 +319,9 @@ def fingerprint_and_lookup(file_path, acoustid_key=None):
         result['error'] = 'No se pudo generar huella acústica (instala fpcalc o pyacoustid)'
         return result
 
-    acoustid_key = acoustid_key or ACOUSTID_KEY or os.environ.get('ACOUSTID_KEY')
+    acoustid_key = acoustid_key or ACOUSTID_KEY
     if not acoustid_key:
-        result['error'] = 'No ACOUSTID_KEY configurada (usa ACOUSTID_KEY env var)'
+        result['error'] = 'No ACOUSTID_KEY configurada (put it in the script)'
         return result
 
     try:
@@ -342,11 +336,16 @@ def fingerprint_and_lookup(file_path, acoustid_key=None):
             data = r.json()
             for score_item in data.get('results', []):
                 for rec in score_item.get('recordings', []):
-                    entry = {'score': score_item.get('score'), 'title': rec.get('title'), 'artists': [a.get('name') for a in rec.get('artists', [])], 'isrcs': rec.get('isrcs', []) if rec.get('isrcs') else []}
+                    entry = {
+                        'score': score_item.get('score'),
+                        'title': rec.get('title'),
+                        'artists': [a.get('name') for a in rec.get('artists', [])],
+                        'isrcs': rec.get('isrcs', []) if rec.get('isrcs') else []
+                    }
                     mbid = rec.get('id')
                     if not entry['isrcs'] and mbid:
                         try:
-                            mbr = requests.get(f'https://musicbrainz.org/ws/2/recording/{mbid}', params={'inc':'isrcs','fmt':'json'}, timeout=10, headers={'User-Agent':'esvintable/1.0 (https://github.com/JesusQuijada34)'} )
+                            mbr = requests.get(f'https://musicbrainz.org/ws/2/recording/{mbid}', params={'inc':'isrcs','fmt':'json'}, timeout=10, headers={'User-Agent':'esvintable/1.0'})
                             if mbr.status_code == 200:
                                 mr = mbr.json()
                                 isrcs = mr.get('isrcs', [])
@@ -360,11 +359,73 @@ def fingerprint_and_lookup(file_path, acoustid_key=None):
         result['error'] = str(e)
     return result
 
+# ===== FUNCIONALIDAD: descubrir SoundCloud client_id por scraping =====
+def discover_soundcloud_client_id(timeout=10, max_scripts=30):
+    """Intenta descubrir automáticamente un client_id válido de SoundCloud mediante scraping de su página
+    y de los archivos JavaScript referenciados. Retorna client_id o None.
+    """
+    global SOUNDCLOUD_CLIENT_ID
+    if SOUNDCLOUD_CLIENT_ID:
+        return SOUNDCLOUD_CLIENT_ID
+
+    scraper = cloudscraper.create_scraper()
+    candidates = set()
+
+    try:
+        print(color('🔎 Intentando descubrir SoundCloud client_id (scraping)...', Colors.BRIGHT_YELLOW))
+        r = scraper.get('https://soundcloud.com', timeout=timeout)
+        text = r.text if r.status_code == 200 else ''
+
+        patterns = [
+            r'client_id\\s*[:=]\\s*"([a-zA-Z0-9_-]{8,})"',
+            r'client_id\\s*[:=]\\s*'"'"'([a-zA-Z0-9_-]{8,})'"'"'',
+            r'client_id=([a-zA-Z0-9_-]{8,})',
+            r'client_id\\"\\:\\"([a-zA-Z0-9_-]{8,})\\"',
+        ]
+        for pat in patterns:
+            for m in re.finditer(pat, text):
+                candidates.add(m.group(1))
+
+        script_urls = re.findall(r'<script[^>]+src=["\']([^"\']+)["\']', text)
+        count = 0
+        for s in script_urls:
+            if count >= max_scripts:
+                break
+            if s.startswith('//'):
+                s = 'https:' + s
+            elif s.startswith('/'):
+                s = 'https://soundcloud.com' + s
+            try:
+                sr = scraper.get(s, timeout=timeout)
+                if sr.status_code == 200:
+                    st = sr.text
+                    for pat in patterns:
+                        for m in re.finditer(pat, st):
+                            candidates.add(m.group(1))
+                count += 1
+            except Exception:
+                continue
+
+        # Validar candidates comprobando que sirven en una llamada simple a la API
+        for cid in list(candidates):
+            try:
+                test = scraper.get('https://api-v2.soundcloud.com/tracks', params={'q':'test','limit':1,'client_id':cid}, timeout=8)
+                if test.status_code == 200:
+                    SOUNDCLOUD_CLIENT_ID = cid
+                    print(color(f'✅ SoundCloud client_id descubierto: {cid}', Colors.BRIGHT_GREEN))
+                    return cid
+            except Exception:
+                continue
+
+    except Exception as e:
+        print(color(f'⚠️ Error descubriendo client_id: {e}', Colors.YELLOW))
+
+    print(color('❌ No se pudo descubrir un client_id válido automáticamente.', Colors.BRIGHT_RED))
+    return None
+
 # ===== EXPLORADOR DE ARCHIVOS INTERACTIVO =====
 def file_explorer(start_path='.'):
-    """Explorador interactivo: flechas ↑↓ para moverte, Enter para abrir/seleccionar, q para salir."""
     current = os.path.abspath(start_path)
-
     def list_dir(path):
         try:
             items = os.listdir(path)
@@ -378,7 +439,6 @@ def file_explorer(start_path='.'):
             elif os.path.isfile(full) and name.lower().endswith(SUPPORTED_AUDIO):
                 entries.append({'type':'file','name':name,'path':full})
         return entries
-
     index = 0
     stack = [current]
     while True:
@@ -387,7 +447,6 @@ def file_explorer(start_path='.'):
         entries = list_dir(current)
         print(color(f"📁 Explorador: {current}", Colors.BRIGHT_CYAN))
         print(color("(Usa ↑↓ para navegar, Enter para abrir/seleccionar, Backspace para subir, q para salir)", Colors.YELLOW))
-
         if not entries:
             print(color("  -- vacío --", Colors.BRIGHT_RED))
         for i, e in enumerate(entries):
@@ -397,8 +456,6 @@ def file_explorer(start_path='.'):
                 print(color(display, Colors.BRIGHT_GREEN))
             else:
                 print(display)
-
-        # leer tecla
         if READCHAR_AVAILABLE:
             k = readchar.readkey()
             if k == readchar.key.UP:
@@ -421,7 +478,6 @@ def file_explorer(start_path='.'):
             elif k.lower() == 'q':
                 return None
         else:
-            # Fallback: input numérico
             print('\nListado:')
             for i, e in enumerate(entries, 1):
                 print(f"{i}. {e['name']}{'/' if e['type']=='dir' else ''}")
@@ -445,14 +501,12 @@ def file_explorer(start_path='.'):
                 continue
 
 # ===== BÚSQUEDAS ONLINE =====
-# Spotify: usa Client Credentials si se definen variables de entorno
 def spotify_search(query, limit=5):
     client_id = SPOTIFY_CLIENT_ID
     client_secret = SPOTIFY_CLIENT_SECRET
     if not client_id or not client_secret:
-        print(color("⚠️ Spotify: define SPOTIFY_CLIENT_ID y SPOTIFY_CLIENT_SECRET en variables de entorno para búsquedas.", Colors.YELLOW))
+        print(color("⚠️ Spotify: define SPOTIFY_CLIENT_ID y SPOTIFY_CLIENT_SECRET en el script para búsquedas.", Colors.YELLOW))
         return []
-    # obtener token
     data = {'grant_type':'client_credentials'}
     r = requests.post('https://accounts.spotify.com/api/token', data=data, auth=(client_id, client_secret), timeout=10)
     if r.status_code != 200:
@@ -469,7 +523,6 @@ def spotify_search(query, limit=5):
             results.append({'source':'spotify','type':'track','name':t.get('name'),'artist':', '.join([a['name'] for a in t.get('artists',[])])})
     return results
 
-# Qobuz: búsqueda pública (scraping ligero)
 def qobuz_search(query, limit=8):
     scraper = cloudscraper.create_scraper()
     url = f"https://www.qobuz.com/search/{requests.utils.quote(query)}"
@@ -487,7 +540,6 @@ def qobuz_search(query, limit=8):
     print(color("⚠️ Búsqueda Qobuz fallida o no disponible (anti-scraping).", Colors.YELLOW))
     return []
 
-# iTunes Search API (no auth) — útil como respaldo
 def itunes_search(query, limit=8):
     try:
         params = {'term': query, 'limit': limit}
@@ -502,7 +554,6 @@ def itunes_search(query, limit=8):
         pass
     return []
 
-# Deezer search (public)
 def deezer_search(query, limit=8):
     try:
         r = requests.get('https://api.deezer.com/search', params={'q':query,'limit':limit}, timeout=10)
@@ -516,11 +567,16 @@ def deezer_search(query, limit=8):
         pass
     return []
 
-# SoundCloud search (requiere client id en variable SOUNDCLOUD_CLIENT_ID)
 def soundcloud_search(query, limit=8):
+    global SOUNDCLOUD_CLIENT_ID
     client = SOUNDCLOUD_CLIENT_ID
     if not client:
-        print(color('⚠️ SoundCloud: define SOUNDCLOUD_CLIENT_ID en variables de entorno para búsquedas.', Colors.YELLOW))
+        # intentar autodescubrimiento
+        cid = discover_soundcloud_client_id()
+        if cid:
+            client = cid
+    if not client:
+        print(color('⚠️ SoundCloud: no se tiene client_id (intenta descubrirlo o configúralo en el script).', Colors.YELLOW))
         return []
     try:
         url = 'https://api-v2.soundcloud.com/search/tracks'
@@ -536,7 +592,6 @@ def soundcloud_search(query, limit=8):
         pass
     return []
 
-# Función unificadora de búsqueda online
 def unified_search(query):
     print(color(f"🔎 Buscando: {query}", Colors.BRIGHT_CYAN))
     results = []
@@ -546,7 +601,6 @@ def unified_search(query):
     results.extend(itunes_search(query))
     results.extend(deezer_search(query))
     results.extend(soundcloud_search(query))
-    # Eliminar duplicados por (source,name,artist)
     seen = set()
     unique = []
     for r in results:
@@ -556,7 +610,7 @@ def unified_search(query):
             unique.append(r)
     return unique
 
-# ===== DESCARGA POR ISRC (usando proveedores) =====
+# ===== DESCARGA POR ISRC =====
 def download_by_isrc(isrc, output_dir="descargas_isrc"):
     scraper = cloudscraper.create_scraper()
     print(color(f"🔍 Buscando ISRC: {isrc}", Colors.BRIGHT_CYAN))
@@ -600,18 +654,15 @@ MAIN_MENU = [
     {'key':'7','label':'❌ Salir','fn':'exit'}
 ]
 
-
 def print_banner():
     print(color("============================================", Colors.BRIGHT_BLUE))
     print(color(f" 🎵 ESVINTABLE v{updater.local_version} - {PLATFORM_LABEL}", Colors.BRIGHT_GREEN))
     print(color("============================================", Colors.BRIGHT_BLUE))
 
-
 def print_menu(selected_index=0):
     for i, item in enumerate(MAIN_MENU):
         prefix = '▶' if i == selected_index else ' '
         print(prefix, item['key'] + '.', item['label'])
-
 
 def run_menu():
     selected = 0
@@ -645,7 +696,8 @@ def run_menu():
                 print(color('Opción inválida', Colors.RED))
                 time.sleep(1)
 
-# Dispatcher de funciones (base)
+# Dispatcher base and extended implemented below
+
 def dispatch_base(name):
     if name == 'explorer':
         path = file_explorer('.')
@@ -702,15 +754,12 @@ def dispatch_base(name):
         return False
     return True
 
-# Dispatcher extendido que maneja fingerprint + base
 def dispatch(name):
     if name == 'search_isrc_file':
         path = file_explorer('.')
         if path:
-            # primero extraer metadatos
             info = extract_isrc(path)
             display_file_info(info)
-            # si no tiene isrc, intentar fingerprint
             if not info.get('isrc'):
                 print(color('🔊 Intentando identificación por huella acústica...', Colors.BRIGHT_YELLOW))
                 res = fingerprint_and_lookup(path, acoustid_key=ACOUSTID_KEY)
@@ -735,6 +784,8 @@ def main():
     if not ensure_dependencies():
         print(color('No se pudieron instalar dependencias. Ejecuta manualmente pip install readchar requests cloudscraper mutagen pyacoustid', Colors.RED))
         return
+    if not SOUNDCLOUD_CLIENT_ID:
+        discover_soundcloud_client_id()
     updater.start_update_checker()
     updater.check_for_updates(silent=True)
     try:
