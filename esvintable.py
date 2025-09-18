@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# esVintable - Script completo con actualizador
-# Autor: @JesusQuijada34 (y adaptaciones posteriores)
+# esVintable - Script completo con actualizador + Explorador mejorado (v2)
+# Autor: @JesusQuijada34 (base) - Mejoras por asistente
+# NOTA: Se han añadido mejoras al explorador sin tocar las APIs externas ni eliminar el sistema de actualización.
 
 import os
 import sys
@@ -21,6 +22,7 @@ from mutagen.mp4 import MP4
 import json
 import hashlib
 import base64
+import shutil
 
 try:
     import readchar
@@ -70,6 +72,9 @@ PLATFORM_LABEL = (
 
 SUPPORTED_AUDIO = ('.mp3', '.flac', '.wav', '.m4a', '.aac', '.ogg', '.opus', '.wma')
 
+# VERSION DEL EXPLORADOR (no tocar si vas a extender)
+EXPLORADOR_VERSION = "2.0"
+
 class Colors:
     RED = '\033[91m'
     GREEN = '\033[92m'
@@ -85,6 +90,7 @@ class Colors:
     BRIGHT_YELLOW = '\033[38;5;226m'
     BRIGHT_BLUE = '\033[38;5;21m'
     BRIGHT_CYAN = '\033[38;5;87m'
+    INVERT = '\033[7m'  # fondo invertido
 
 def color(text, color_code):
     return f"{color_code}{text}{Colors.END}"
@@ -93,7 +99,7 @@ def clear():
     os.system('cls' if IS_WINDOWS else 'clear')
 
 # ==============================================================
-#             SISTEMA DE ACTUALIZACIÓN
+#             SISTEMA DE ACTUALIZACIÓN (sin cambios)
 # ==============================================================
 
 def get_remote_details():
@@ -219,6 +225,7 @@ def extract_metadata(file_path):
     except Exception:
         pass
     return metadata
+
 # ==============================================================
 #         EXTRACCIÓN DE ISRC, FINGERPRINT Y BÚSQUEDAS
 # ==============================================================
@@ -539,14 +546,64 @@ def display_file_info(info):
     if 'method' in info:
         print(f"   Método: {info['method']}")
 
+def human_size(n):
+    try:
+        n = int(n)
+    except Exception:
+        return str(n)
+    for unit in ['B','KB','MB','GB','TB']:
+        if n < 1024:
+            return f"{n}{unit}"
+        n //= 1024
+    return f"{n}PB"
+
+def format_mtime(path):
+    try:
+        t = os.path.getmtime(path)
+        return datetime.fromtimestamp(t).strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return "-"
+
 # ==============================================================
-#                EXPLORADOR DE ARCHIVOS INTERACTIVO
+#                EXPLORADOR DE ARCHIVOS INTERACTIVO (MEJORADO)
 # ==============================================================
+
+def ffplay_available():
+    """Detecta si ffplay está disponible en PATH (usado para previsualizar)."""
+    try:
+        # Windows puede requerir ffplay.exe
+        return shutil.which('ffplay') is not None
+    except Exception:
+        return False
+
+def preview_audio(path, seconds=10):
+    """Previsualiza un fragmento de audio usando ffplay si está disponible."""
+    if not ffplay_available():
+        print(color("[!] Previsualización no disponible (ffplay no está instalado).", Colors.YELLOW))
+        return
+    try:
+        # -nodisp evitar ventana, -autoexit salir al terminar -t tiempo en segundos -loglevel quiet para menos salida
+        cmd = ['ffplay', '-nodisp', '-autoexit', '-t', str(seconds), '-loglevel', 'quiet', path]
+        subprocess.run(cmd)
+    except Exception as e:
+        print(color(f"[!] Error previsualizando: {e}", Colors.RED))
 
 def file_explorer(start_path='.'):
+    """
+    Explorador mejorado:
+    - iconos para carpetas/archivos
+    - orden inteligente: dirs primero
+    - historial (h)
+    - búsqueda con /
+    - múltiple selección con m
+    - modo lista detallada l
+    - previsualizar 10s con p
+    - exportar selección a JSON con x
+    - ver metadatos rápidos al seleccionar (panel lateral)
+    """
     current = os.path.abspath(start_path)
 
-    def list_dir(path):
+    def list_dir(path, filter_text=None):
         try:
             items = os.listdir(path)
         except Exception:
@@ -558,27 +615,87 @@ def file_explorer(start_path='.'):
                 entries.append({'type':'dir','name':name,'path':full})
             elif os.path.isfile(full) and name.lower().endswith(SUPPORTED_AUDIO):
                 entries.append({'type':'file','name':name,'path':full})
+        # Orden: dirs primero
+        entries.sort(key=lambda e: (0 if e['type']=='dir' else 1, e['name'].lower()))
+        if filter_text:
+            ft = filter_text.lower()
+            entries = [e for e in entries if ft in e['name'].lower()]
         return entries
 
     index = 0
     stack = [current]
+    history = []
+    marked = set()  # indices marked for multiple selection (store absolute path)
+    filter_text = None
+    detailed_mode = False
+
     while True:
         clear()
         current = stack[-1]
-        entries = list_dir(current)
-        print(color(f"📁 Explorador: {current}", Colors.BRIGHT_CYAN))
-        print(color("(Usa ↑↓ para navegar, Enter para abrir/seleccionar, Backspace para subir, q para salir)", Colors.YELLOW))
+        entries = list_dir(current, filter_text=filter_text)
+        total_dirs = sum(1 for e in entries if e['type']=='dir')
+        total_files = sum(1 for e in entries if e['type']=='file')
+
+        # HEADER
+        width = shutil.get_terminal_size((80,20)).columns
+        print(color("╔" + "═"*(min(76, width-2)) + "╗", Colors.BRIGHT_BLUE))
+        title = f" 🎵 EXPLORADOR (v{EXPLORADOR_VERSION}) - {PLATFORM_LABEL} "
+        print(color("║ " + title.ljust(min(76, width-4)) + "║", Colors.BRIGHT_BLUE))
+        print(color("╟" + "─"*(min(76, width-2)) + "╢", Colors.BRIGHT_BLUE))
+
+        # RUTA
+        print(color(f"📁 {current}", Colors.BRIGHT_CYAN))
+        print(color("(↑↓ navegar · Enter abrir/seleccionar · Backspace subir · / buscar · m marcar · p previsualizar · l lista detallada · x exportar · h historial · q salir)", Colors.YELLOW))
+        print("")
 
         if not entries:
             print(color("  -- vacío --", Colors.BRIGHT_RED))
         for i, e in enumerate(entries):
-            prefix = '▶' if i == index else ' '
-            display = f"{prefix} {e['name']}{'/' if e['type']=='dir' else ''}"
-            if i == index:
-                print(color(display, Colors.BRIGHT_GREEN))
+            is_sel = (i == index)
+            icon = "📁" if e['type']=='dir' else "🎵"
+            mark = "*" if e['path'] in marked else " "
+            display_name = f"{icon} {e['name']}{'/' if e['type']=='dir' else ''}"
+            # si modo detallado, añadir tamaño y fecha
+            if detailed_mode and e['type']=='file':
+                try:
+                    size = human_size(os.path.getsize(e['path']))
+                except Exception:
+                    size = "-"
+                mtime = format_mtime(e['path'])
+                display_name = f"{display_name:50.50} {size:8} {mtime}"
+            prefix = '▶' if is_sel else ' '
+            if is_sel:
+                # mostrar invertido
+                print(color(f"{prefix} {mark} {display_name}", Colors.INVERT + Colors.BRIGHT_GREEN))
             else:
-                print(display)
+                # color por tipo
+                col = Colors.BRIGHT_BLUE if e['type']=='dir' else Colors.BRIGHT_GREEN
+                print(f"{prefix} {mark} {color(display_name, col)}")
 
+        # PANEL LATERAL / INFO RÁPIDA
+        print("\n" + "-"*min(76, width-2))
+        sel_info = None
+        if entries:
+            sel = entries[index]
+            if sel['type'] == 'file':
+                md = extract_metadata(sel['path'])
+                isrc_info = extract_isrc(sel['path'])
+                sel_info = {"path": sel['path'], "name": sel['name'], "meta": md, "isrc": isrc_info.get('isrc')}
+                print(color(f"Archivo seleccionado: {sel['name']}", Colors.CYAN))
+                print(f"  Artista: {md.get('artist','-')}   Título: {md.get('title','-')}")
+                print(f"  ISRC: {isrc_info.get('isrc','-')}")
+                print(f"  Tamaño: {human_size(os.path.getsize(sel['path']))}   Modificado: {format_mtime(sel['path'])}")
+            else:
+                print(color(f"Carpeta seleccionada: {sel['name']}/", Colors.BRIGHT_BLUE))
+                print(f"  Contiene: {len(os.listdir(sel['path']))} entradas (visibles)")
+
+        # Barra de estado inferior
+        print(color("-"*min(76, width-2), Colors.BRIGHT_BLUE))
+        status = f"Ruta: {current}  |  Directorios: {total_dirs}  Archivos: {total_files}  Marcados: {len(marked)}"
+        print(color(status, Colors.BRIGHT_CYAN))
+        print(color("Atajos: ↑↓ navegar · Enter abrir/seleccionar · Backspace subir · / buscar · m marcar · p previsualizar · l lista detallada · x exportar · h historial · q salir", Colors.YELLOW))
+
+        # INPUT: lectora por readchar o por input
         if READCHAR_AVAILABLE:
             k = readchar.readkey()
             if k == readchar.key.UP:
@@ -590,38 +707,164 @@ def file_explorer(start_path='.'):
                     continue
                 sel = entries[index]
                 if sel['type'] == 'dir':
+                    history.append(current)
                     stack.append(sel['path'])
                     index = 0
+                    filter_text = None
                 else:
+                    # seleccionar archivo único (devolver path)
                     return sel['path']
             elif k == readchar.key.BACKSPACE:
                 if len(stack) > 1:
                     stack.pop()
                     index = 0
+                else:
+                    # nada
+                    pass
             elif k.lower() == 'q':
                 return None
+            elif k == '/':
+                # buscar: pedir texto
+                try:
+                    # no blocking readchar: usar input
+                    term = input("Buscar (filtro en nombres, Enter para cancelar): ").strip()
+                    filter_text = term or None
+                    index = 0
+                except Exception:
+                    filter_text = None
+            elif k.lower() == 'm':
+                # marcar/desmarcar el actual
+                if entries:
+                    sel = entries[index]
+                    p = sel['path']
+                    if p in marked:
+                        marked.remove(p)
+                    else:
+                        marked.add(p)
+            elif k.lower() == 'h':
+                # historial
+                if history:
+                    print("Historial de rutas:")
+                    for i_h, h in enumerate(reversed(history[-10:]), 1):
+                        print(f"{i_h}. {h}")
+                    try:
+                        selh = input("Ir a número (Enter cancelar): ").strip()
+                        if selh:
+                            idx = int(selh)-1
+                            target = list(reversed(history[-10:]))[idx]
+                            stack.append(target)
+                            index = 0
+                    except Exception:
+                        pass
+                else:
+                    print(color("Historial vacío.", Colors.YELLOW))
+                    time.sleep(0.8)
+            elif k.lower() == 'p':
+                # previsualizar si archivo
+                if entries:
+                    sel = entries[index]
+                    if sel['type'] == 'file':
+                        print(color("Previsualizando 10s...", Colors.BRIGHT_YELLOW))
+                        preview_audio(sel['path'], seconds=10)
+                        input("Enter para continuar...")
+            elif k.lower() == 'l':
+                detailed_mode = not detailed_mode
+            elif k.lower() == 'x':
+                # exportar marcados o actual si no hay marcados
+                to_export = list(marked) if marked else ([entries[index]['path']] if entries else [])
+                if not to_export:
+                    print(color("Nada para exportar.", Colors.YELLOW))
+                    time.sleep(0.8)
+                else:
+                    out_name = input("Nombre archivo JSON (Enter para export_selection.json): ").strip() or "export_selection.json"
+                    exlist = []
+                    for p in to_export:
+                        meta = extract_metadata(p)
+                        isrc = extract_isrc(p)
+                        exlist.append({'path': p, 'filename': os.path.basename(p), 'title': meta.get('title'), 'artist': meta.get('artist'), 'isrc': isrc.get('isrc')})
+                    try:
+                        with open(out_name, 'w', encoding='utf-8') as ef:
+                            json.dump({'exported': exlist, 'created_at': datetime.now().isoformat(), 'explorer_version': EXPLORADOR_VERSION}, ef, indent=2, ensure_ascii=False)
+                        print(color(f"Exportado {len(exlist)} entradas a {out_name}", Colors.BRIGHT_GREEN))
+                    except Exception as e:
+                        print(color(f"Error exportando: {e}", Colors.RED))
+                    time.sleep(0.8)
+            else:
+                # otras teclas ignoradas
+                pass
         else:
-            print('\nListado:')
+            # fallback sin readchar: mostrar menú numerado y permitir comandos
+            print("\nListado:")
             for i, e in enumerate(entries, 1):
                 print(f"{i}. {e['name']}{'/' if e['type']=='dir' else ''}")
-            choice = input("Selecciona número (número, b=volver, q=salir): ").strip().lower()
-            if choice == 'q':
+            cmd = input("Selecciona número (número, b=volver, /=buscar, m=marcar, p=preview, l=lista, x=export, h=hist, q=salir): ").strip().lower()
+            if cmd == 'q':
                 return None
-            if choice == 'b':
+            elif cmd == 'b':
                 if len(stack) > 1:
                     stack.pop()
                 continue
-            try:
-                idx = int(choice) - 1
-                if 0 <= idx < len(entries):
-                    sel = entries[idx]
-                    if sel['type'] == 'dir':
-                        stack.append(sel['path'])
-                        index = 0
-                    else:
-                        return sel['path']
-            except Exception:
+            elif cmd == '/':
+                term = input("Buscar: ").strip()
+                filter_text = term or None
+                index = 0
                 continue
+            elif cmd == 'm':
+                try:
+                    idx = int(input("Número a marcar/desmarcar: ").strip()) - 1
+                    if 0 <= idx < len(entries):
+                        p = entries[idx]['path']
+                        if p in marked:
+                            marked.remove(p)
+                        else:
+                            marked.add(p)
+                except Exception:
+                    pass
+                continue
+            elif cmd == 'p':
+                try:
+                    idx = int(input("Número archivo a previsualizar: ").strip()) - 1
+                    if 0 <= idx < len(entries) and entries[idx]['type']=='file':
+                        preview_audio(entries[idx]['path'], seconds=10)
+                except Exception:
+                    pass
+                continue
+            elif cmd == 'l':
+                detailed_mode = not detailed_mode
+                continue
+            elif cmd == 'x':
+                to_export = list(marked) if marked else ([entries[index]['path']] if entries else [])
+                if not to_export:
+                    print(color("Nada para exportar.", Colors.YELLOW))
+                    time.sleep(0.8)
+                else:
+                    out_name = input("Nombre archivo JSON (Enter para export_selection.json): ").strip() or "export_selection.json"
+                    exlist = []
+                    for p in to_export:
+                        meta = extract_metadata(p)
+                        isrc = extract_isrc(p)
+                        exlist.append({'path': p, 'filename': os.path.basename(p), 'title': meta.get('title'), 'artist': meta.get('artist'), 'isrc': isrc.get('isrc')})
+                    try:
+                        with open(out_name, 'w', encoding='utf-8') as ef:
+                            json.dump({'exported': exlist, 'created_at': datetime.now().isoformat(), 'explorer_version': EXPLORADOR_VERSION}, ef, indent=2, ensure_ascii=False)
+                        print(color(f"Exportado {len(exlist)} entradas a {out_name}", Colors.BRIGHT_GREEN))
+                    except Exception as e:
+                        print(color(f"Error exportando: {e}", Colors.RED))
+                    time.sleep(0.8)
+                continue
+            else:
+                try:
+                    idx = int(cmd) - 1
+                    if 0 <= idx < len(entries):
+                        sel = entries[idx]
+                        if sel['type'] == 'dir':
+                            history.append(current)
+                            stack.append(sel['path'])
+                            index = 0
+                        else:
+                            return sel['path']
+                except Exception:
+                    continue
 
 # ==============================================================
 #                     MENÚ / DISPATCH
@@ -629,7 +872,7 @@ def file_explorer(start_path='.'):
 
 MAIN_MENU = [
     {'key':'1','label':'🔍 Extraer ISRC (metadatos + fingerprint)','fn':'search_isrc_file'},
-    {'key':'2','label':'📁 Explorador interactivo','fn':'explorer'},
+    {'key':'2','label':'📁 Explorador interactivo (mejorado)','fn':'explorer'},
     {'key':'3','label':'🌐 Búsqueda online (Spotify/Qobuz/iTunes/Deezer/SoundCloud)','fn':'online_search'},
     {'key':'4','label':'⬇️ Descargar por ISRC','fn':'download_isrc'},
     {'key':'5','label':'📂 Listar archivos de audio en directorio','fn':'list_dir'},
@@ -819,7 +1062,7 @@ def main():
     # intentar autodescubrir SoundCloud client_id si no hay
     if not SOUNDCLOUD_CLIENT_ID:
         discover_soundcloud_client_id()
-    # arrancar updater background
+    # arrancar updater background (no se elimina)
     updater_thread = Thread(target=auto_updater, daemon=True)
     updater_thread.start()
     try:
