@@ -39,7 +39,7 @@ TOKEN = os.environ.get('ESVINTABLE_TOKEN', "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9
 # API keys/config variables (usa variables de entorno o un config.json si lo prefieres)
 SPOTIFY_CLIENT_ID = ''
 SPOTIFY_CLIENT_SECRET = ''
-ACOUSTID_KEY = ''
+ACOUSTID_KEY = '87NqIfCkj8'
 SOUNDCLOUD_CLIENT_ID = ''
 
 PROVIDERS = [
