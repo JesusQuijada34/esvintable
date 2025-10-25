@@ -316,7 +316,19 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Usar file_id del objeto de archivo
     file_id = file_info.file_id
     
-    # Verificar que sea un archivo de audio (si es video, se intentará procesar si tiene metadatos)
+    # 1. Validación de tamaño de archivo (Límite de 50 MB)
+    MAX_FILE_SIZE_MB = 50
+    MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
+    
+    if file_info.file_size > MAX_FILE_SIZE_BYTES:
+        await update.message.reply_text(
+            f"❌ Archivo demasiado grande.\n\n"
+            f"El tamaño máximo permitido es de {MAX_FILE_SIZE_MB} MB. Su archivo es de {file_info.file_size / (1024*1024):.2f} MB.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+    
+    # 2. Verificar que sea un archivo de audio (si es video, se intentará procesar si tiene metadatos)
     SUPPORTED_AUDIO = ('.mp3', '.flac', '.wav', '.m4a', '.aac', '.ogg', '.opus', '.wma', '.mp4') # Se añade .mp4 para el caso de video/audio
     if not file_name.lower().endswith(SUPPORTED_AUDIO):
         await update.message.reply_text(
