@@ -13,6 +13,8 @@ import json
 import hashlib
 from pathlib import Path
 import yt_dlp
+import subprocess
+import time
 from datetime import datetime
 from dotenv import load_dotenv
 
@@ -189,7 +191,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("🔍 Extraer ISRC", callback_data="extract_isrc")
         ],
         [
-            InlineKeyboardButton("🎬 YouTube ISRC", callback_data="youtube_isrc")
+            InlineKeyboardButton("🎬 YouTube ISRC", callback_data="youtube_isrc"),
             InlineKeyboardButton("👆 Fingerprint", callback_data="fingerprint"),
             InlineKeyboardButton("❓ Ayuda", callback_data="help")
         ]
@@ -294,9 +296,117 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Maneja archivos enviados"""
-    document = update.message.document
-    file_name = document.file_name
+    """Maneja archivos enviados (Documento, Audio o Video)"""
+    
+    # Determinar qué tipo de archivo se recibió
+    if update.message.document:
+        file_info = update.message.document
+        file_name = file_info.file_name
+    elif update.message.audio:
+        file_info = update.message.audio
+        file_name = f"audio_{file_info.file_unique_id}.{file_info.mime_type.split('/')[-1]}" if file_info.mime_type else f"audio_{file_info.file_unique_id}.mp3"
+    elif update.message.video:
+        file_info = update.message.video
+        file_name = f"video_{file_info.file_unique_id}.{file_info.mime_type.split('/')[-1]}" if file_info.mime_type else f"video_{file_info.file_unique_id}.mp4"
+    else:
+        # Esto no debería pasar con los filtros establecidos, pero es una buena práctica.
+        await update.message.reply_text("❌ No se reconoció el tipo de archivo enviado.")
+        return
+    
+    # Usar file_id del objeto de archivo
+    file_id = file_info.file_id
+    
+    # Verificar que sea un archivo de audio (si es video, se intentará procesar si tiene metadatos)
+    SUPPORTED_AUDIO = ('.mp3', '.flac', '.wav', '.m4a', '.aac', '.ogg', '.opus', '.wma', '.mp4') # Se añade .mp4 para el caso de video/audio
+    if not file_name.lower().endswith(SUPPORTED_AUDIO):
+        await update.message.reply_text(
+            "❌ Formato no soportado.\n\n"
+            "Formatos válidos: `MP3, FLAC, M4A, MP4, AAC, OGG, OPUS, WMA, WAV`",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+    
+    # Descargar archivo
+    await update.message.reply_text("⏳ Procesando archivo...")
+    
+    try:
+        file = await context.bot.get_file(file_id)
+        # Usar un nombre de archivo seguro y único en /tmp
+        temp_dir = Path("/tmp")
+        # El nombre del archivo debe ser único para evitar colisiones
+        unique_filename = f"{os.getpid()}_{file_info.file_unique_id}_{file_name}"
+        file_path = temp_dir / unique_filename
+        
+        await file.download_to_drive(file_path)
+        file_path = str(file_path) # Convertir a string para usar en las funciones auxiliares
+        context.user_data['last_file_path'] = file_path # Guardar la ruta para limpieza/uso posterior
+        
+        action = context.user_data.get('action', 'extract_metadata')
+        
+        if action == 'extract_metadata':
+            metadata = extract_metadata(file_path)
+            message = format_metadata_message(metadata)
+        
+        elif action == 'extract_isrc':
+            isrc_data = extract_isrc(file_path)
+            # metadata = extract_metadata(file_path) # No es necesario extraer metadatos dos veces, ya está en isrc_data
+            
+            message = "🎵 *Información ISRC*\n\n"
+            message += f"*Archivo:* `{isrc_data['filename']}`\n"
+            message += f"*Artista:* `{isrc_data['artist'] or 'Desconocido'}`\n"
+            message += f"*Título:* `{isrc_data['title'] or 'Desconocido'}`\n"
+            message += f"*ISRC:* `{isrc_data['isrc'] or 'No encontrado'}`\n"
+        
+        elif action == 'fingerprint':
+            fingerprint = generate_fingerprint(file_path)
+            message = (
+                "👆 *Fingerprint SHA256*\n\n"
+                f"`{fingerprint}`"
+            )
+        
+        else:
+            message = "❌ Acción no reconocida."
+        
+        # Enviar resultado
+        await update.message.reply_text(
+            message,
+            parse_mode=ParseMode.MARKDOWN
+        )
+        
+        # Limpiar archivo temporal
+        if 'last_file_path' in context.user_data:
+            os.remove(context.user_data.pop('last_file_path'))
+        
+        # Mostrar menú nuevamente
+        keyboard = [
+            [
+                InlineKeyboardButton("📊 Extraer Metadatos", callback_data="extract_metadata"),
+                InlineKeyboardButton("🔍 Extraer ISRC", callback_data="extract_isrc")
+            ],
+            [
+                InlineKeyboardButton("🎬 YouTube ISRC", callback_data="youtube_isrc"),
+                InlineKeyboardButton("👆 Fingerprint", callback_data="fingerprint"),
+                InlineKeyboardButton("❓ Ayuda", callback_data="help")
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text(
+            "¿Qué deseas hacer ahora?",
+            reply_markup=reply_markup,
+            parse_mode=ParseMode.MARKDOWN
+        )
+    
+    except Exception as e:
+        logger.error(f"Error procesando archivo: {e}")
+        await update.message.reply_text(
+            f"❌ Error procesando archivo:\n`{str(e)}`",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        # Limpiar archivo temporal en caso de error
+        if 'last_file_path' in context.user_data:
+            os.remove(context.user_data.pop('last_file_path'))
+        
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Verificar que sea un archivo de audio
     SUPPORTED_AUDIO = ('.mp3', '.flac', '.wav', '.m4a', '.aac', '.ogg', '.opus', '.wma')
@@ -400,7 +510,9 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_youtube_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Maneja enlaces de YouTube para descargar y extraer ISRC"""
     url = update.message.text
-    await update.message.reply_text(f"⏳ Enlace recibido: `{url}`. Iniciando descarga y procesamiento...", parse_mode=ParseMode.MARKDOWN)
+    
+    # 1. Mensaje de inicio
+    status_message = await update.message.reply_text(f"⏳ Enlace recibido: `{url}`. Iniciando descarga y procesamiento...", parse_mode=ParseMode.MARKDOWN)
     
     try:
         # Configuración de yt-dlp para descargar solo el audio en el mejor formato
@@ -468,11 +580,53 @@ async def handle_youtube_link(update: Update, context: ContextTypes.DEFAULT_TYPE
         
     except Exception as e:
         logger.error(f"Error procesando enlace de YouTube: {e}")
-        await update.message.reply_text(
-            f"❌ Error procesando enlace de YouTube:\n`{str(e)}`",
+        error_message = str(e)
+        
+        # 2. Notificación de error al usuario
+        await status_message.edit_text(
+            f"❌ Error al procesar el enlace de YouTube:\n\n`{error_message}`\n\n"
+            "El bot intentará actualizar `yt-dlp` y reiniciarse. Por favor, espere un momento.",
             parse_mode=ParseMode.MARKDOWN
         )
-        # Limpiar si el archivo temporal existe
+        
+        # 3. Intento de actualización de yt-dlp
+        try:
+            update_command = [sys.executable, '-m', 'pip', 'install', '--upgrade', 'yt-dlp']
+            result = subprocess.run(update_command, capture_output=True, text=True, check=True)
+            log_output = result.stdout + result.stderr
+            
+            await update.message.reply_text(
+                f"✅ `yt-dlp` actualizado. Reiniciando bot...\n\n"
+                "*Log de Actualización:*\n"
+                f"```\n{log_output[-1000:]}...\n```",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            
+            # 4. Reiniciar el bot (simulado por el entorno)
+            # En un entorno real, esto requeriría un gestor de procesos (como systemd o supervisor)
+            # Aquí, simplemente notificamos al usuario y salimos, asumiendo que el proceso padre lo reiniciará.
+            # Como estamos en nohup, la única forma de reiniciar es que el usuario lo haga o que el proceso se detenga.
+            # Para este entorno, simplemente saldremos del proceso.
+            # En un entorno de producción, se usaría un gestor de procesos para el reinicio.
+            logger.info("Saliendo para forzar el reinicio (simulación de gestor de procesos).")
+            sys.exit(0)
+            
+        except subprocess.CalledProcessError as update_e:
+            log_output = update_e.stdout + update_e.stderr
+            await update.message.reply_text(
+                f"❌ Error al actualizar `yt-dlp`.\n\n"
+                "*Log de Error de Actualización:*\n"
+                f"```\n{log_output[-1000:]}...\n```\n\n"
+                "Por favor, inténtelo de nuevo más tarde o contacte al administrador.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+        except Exception as update_e:
+            await update.message.reply_text(
+                f"❌ Error crítico durante la actualización/reinicio: `{str(update_e)}`",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            
+        # 5. Limpiar y volver al menú si no se pudo reiniciar
         if 'last_file_path' in context.user_data:
             os.remove(context.user_data.pop('last_file_path'))
         context.user_data.pop('action', None)
@@ -492,7 +646,8 @@ def main():
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("about", about_command))
     application.add_handler(CallbackQueryHandler(button_callback))
-    application.add_handler(MessageHandler(filters.Document.ALL, handle_document))
+    # Manejar documentos, audio y video (que Telegram a veces trata como 'document')
+    application.add_handler(MessageHandler(filters.Document.ALL | filters.AUDIO | filters.VIDEO, handle_document))
     # Manejar mensajes de texto que no son comandos, incluyendo los enlaces de YouTube
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     
