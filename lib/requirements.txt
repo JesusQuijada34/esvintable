@@ -4,3 +4,5 @@ cloudscraper==1.2.71
 mutagen==1.47.0
 pygame==2.5.2
 tqdm==4.66.1
+python-telegram-bot==20.7
+python-dotenv==1.0.0
