@@ -2,3 +2,5 @@
 requests==2.31.0
 cloudscraper==1.2.71
 mutagen==1.47.0
+pygame==2.5.2
+tqdm==4.66.1
