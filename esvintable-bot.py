@@ -12,6 +12,7 @@ import logging
 import json
 import hashlib
 from pathlib import Path
+import yt_dlp
 from datetime import datetime
 from dotenv import load_dotenv
 
@@ -188,6 +189,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("🔍 Extraer ISRC", callback_data="extract_isrc")
         ],
         [
+            InlineKeyboardButton("🎬 YouTube ISRC", callback_data="youtube_isrc")
             InlineKeyboardButton("👆 Fingerprint", callback_data="fingerprint"),
             InlineKeyboardButton("❓ Ayuda", callback_data="help")
         ]
@@ -253,11 +255,19 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == "extract_isrc":
         await query.edit_message_text(
             text="📤 Por favor, envía un archivo de audio para extraer su ISRC.\n\n"
-                 "Formatos soportados: MP3, FLAC, M4A, MP4, AAC",
+            "Formatos soportados: MP3, FLAC, M4A, MP4, AAC",
             parse_mode=ParseMode.MARKDOWN
         )
         context.user_data['action'] = 'extract_isrc'
         return SELECT_ACTION
+    
+    elif query.data == "youtube_isrc":
+        await query.edit_message_text(
+            text="🔗 Por favor, envía el enlace de YouTube del video que deseas procesar para extraer su ISRC.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        context.user_data['action'] = 'youtube_isrc'
+        return WAITING_FILE # Usaremos el mismo estado de conversación para esperar el enlace
     
     elif query.data == "fingerprint":
         await query.edit_message_text(
@@ -303,8 +313,15 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     try:
         file = await context.bot.get_file(document.file_id)
-        file_path = f"/tmp/{file_name}"
+        # Usar un nombre de archivo seguro y único en /tmp
+        temp_dir = Path("/tmp")
+        # El nombre del archivo debe ser único para evitar colisiones
+        unique_filename = f"{os.getpid()}_{document.file_unique_id}_{file_name}"
+        file_path = temp_dir / unique_filename
+        
         await file.download_to_drive(file_path)
+        file_path = str(file_path) # Convertir a string para usar en las funciones auxiliares
+        context.user_data['last_file_path'] = file_path # Guardar la ruta para limpieza/uso posterior
         
         action = context.user_data.get('action', 'extract_metadata')
         
@@ -339,7 +356,8 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         
         # Limpiar archivo temporal
-        os.remove(file_path)
+        if 'last_file_path' in context.user_data:
+            os.remove(context.user_data.pop('last_file_path'))
         
         # Mostrar menú nuevamente
         keyboard = [
@@ -368,10 +386,97 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Maneja mensajes de texto"""
-    await update.message.reply_text(
-        "Hola 👋 Usa /start para ver el menú principal o /help para obtener ayuda.",
-        parse_mode=ParseMode.MARKDOWN
-    )
+    text = update.message.text
+    action = context.user_data.get('action')
+    
+    if action == 'youtube_isrc' and ('youtube.com/' in text or 'youtu.be/' in text):
+        await handle_youtube_link(update, context)
+    else:
+        await update.message.reply_text(
+            "Hola 👋 Usa /start para ver el menú principal o /help para obtener ayuda.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+async def handle_youtube_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Maneja enlaces de YouTube para descargar y extraer ISRC"""
+    url = update.message.text
+    await update.message.reply_text(f"⏳ Enlace recibido: `{url}`. Iniciando descarga y procesamiento...", parse_mode=ParseMode.MARKDOWN)
+    
+    try:
+        # Configuración de yt-dlp para descargar solo el audio en el mejor formato
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192',
+            }],
+            'outtmpl': '/tmp/%(title)s.%(ext)s',
+            'noplaylist': True,
+            'quiet': True,
+            'no_warnings': True,
+        }
+        
+        # Usamos un nombre de archivo temporal único para evitar colisiones
+        temp_filename = f"/tmp/{os.getpid()}_youtube_audio"
+        ydl_opts['outtmpl'] = f"{temp_filename}.%(ext)s"
+        
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info_dict = ydl.extract_info(url, download=True)
+            # El archivo descargado (o convertido por FFmpeg) tendrá un nombre con la extensión final
+            downloaded_file = ydl.prepare_filename(info_dict)
+            # Como usamos 'mp3' como preferredcodec, el archivo final será .mp3
+            file_path = f"{temp_filename}.mp3"
+            
+            if not os.path.exists(file_path):
+                # Intentar encontrar el archivo si la extensión no es mp3 (p. ej. si no se pudo convertir)
+                for ext in ['.mp3', '.m4a', '.opus', '.webm']:
+                    potential_path = f"{temp_filename}.{ext}"
+                    if os.path.exists(potential_path):
+                        file_path = potential_path
+                        break
+                
+                if not os.path.exists(file_path):
+                    raise FileNotFoundError("No se pudo encontrar el archivo de audio descargado.")
+
+        context.user_data['last_file_path'] = file_path # Guardar para limpieza
+        
+        # 1. Extraer ISRC
+        isrc_data = extract_isrc(file_path)
+        
+        # 2. Formatear mensaje
+        message = "🎵 *Información ISRC de YouTube*\n\n"
+        message += f"*Enlace:* `{url}`\n"
+        message += f"*Archivo:* `{isrc_data['filename']}`\n"
+        message += f"*Artista:* `{isrc_data['artist'] or 'Desconocido'}`\n"
+        message += f"*Título:* `{isrc_data['title'] or 'Desconocido'}`\n"
+        message += f"*ISRC:* `{isrc_data['isrc'] or 'No encontrado'}`\n"
+        
+        # 3. Enviar resultado
+        await update.message.reply_text(
+            message,
+            parse_mode=ParseMode.MARKDOWN
+        )
+        
+        # 4. Limpiar
+        if 'last_file_path' in context.user_data:
+            os.remove(context.user_data.pop('last_file_path'))
+        context.user_data.pop('action', None)
+        
+        # 5. Mostrar menú nuevamente
+        await start(update, context) # Reutilizar la función start para mostrar el menú
+        
+    except Exception as e:
+        logger.error(f"Error procesando enlace de YouTube: {e}")
+        await update.message.reply_text(
+            f"❌ Error procesando enlace de YouTube:\n`{str(e)}`",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        # Limpiar si el archivo temporal existe
+        if 'last_file_path' in context.user_data:
+            os.remove(context.user_data.pop('last_file_path'))
+        context.user_data.pop('action', None)
+        await start(update, context) # Mostrar menú para que el usuario pueda continuar
 
 # ===== FUNCIÓN PRINCIPAL =====
 
@@ -388,6 +493,7 @@ def main():
     application.add_handler(CommandHandler("about", about_command))
     application.add_handler(CallbackQueryHandler(button_callback))
     application.add_handler(MessageHandler(filters.Document.ALL, handle_document))
+    # Manejar mensajes de texto que no son comandos, incluyendo los enlaces de YouTube
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     
     # Iniciar bot
