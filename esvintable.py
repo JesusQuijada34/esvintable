@@ -118,8 +118,47 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("esVintable - Audio Metadata Explorer")
         self.setMinimumSize(900, 600)
+        self._set_window_icon()
         self._build_ui()
         self._apply_theme()
+
+    def _set_window_icon(self):
+        """
+        Intenta establecer el icono de la ventana desde:
+        1) app/app-icon.ico (ruta relativa dentro del proyecto o del bundle de PyInstaller)
+        2) app-icon.ico en el mismo directorio
+        3) extraer el icono del ejecutable en Windows (si está compilado)
+        """
+        base_dir = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+        candidates = [
+            os.path.join(base_dir, "app", "app-icon.ico"),
+            os.path.join(base_dir, "app-icon.ico"),
+        ]
+        # también comprobar en el directorio del ejecutable (útil para algunos despliegues)
+        try:
+            exe_dir = os.path.dirname(sys.executable)
+            candidates.append(os.path.join(exe_dir, "app-icon.ico"))
+        except Exception:
+            pass
+
+        for p in candidates:
+            if p and os.path.isfile(p):
+                self.setWindowIcon(QIcon(p))
+                return
+
+        # si estamos en Windows y estamos en un ejecutable compilado/ejecutando, intentar usar el .exe como fuente de icono
+        if sys.platform.startswith("win"):
+            try:
+                exe_path = sys.executable
+                if exe_path and os.path.isfile(exe_path):
+                    # QIcon acepta .exe en Windows y cargará el icono incorporado
+                    self.setWindowIcon(QIcon(exe_path))
+                    return
+            except Exception:
+                pass
+
+        # fallback: no icono (QIcon() vacío)
+        self.setWindowIcon(QIcon())
 
     def _build_ui(self):
         central = QWidget()
