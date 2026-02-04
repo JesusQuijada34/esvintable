@@ -1,1 +1,7 @@
+# GITIGNORE
 .env
+backup\
+backup\*
+*.db
+.lastid
+*.txt

@@ -1,1 +1,11 @@
-<app><publisher>Influent</publisher><app>esvintable</app><name>Esvintable</name><version>v9.4-25.09-12.32-danenone</version><with>linux</with><danenone>25.09-12.32</danenone><correlationid>38bbe31d95ca2902ad57af06c8258396b3ad972ee1148d0545a22718019f475b</correlationid><rate>5 - TEEN ALL</rate></app>
+<?xml version="1.0" ?>
+<app>
+  <publisher>Influent</publisher>
+  <app>esvintable</app>
+  <name>Esvintable</name>
+  <version>v9.4-25.09-12.32</version>
+  <author>JesusQuijada34</author>
+  <platform>AlphaCube</platform>
+  <correlationid>e1b6716f3908635e0041b870b0549b6a07b1195f6d36bc6bf140a076e12c4721</correlationid>
+  <rate>PERSONAL USE</rate>
+</app>

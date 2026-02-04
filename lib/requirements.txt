@@ -2,7 +2,7 @@
 requests==2.31.0
 cloudscraper==1.2.71
 mutagen==1.47.0
-pygame==2.5.2
+PyQt5==5.15.10
 tqdm==4.66.1
 python-telegram-bot==20.7
 python-dotenv==1.0.0
