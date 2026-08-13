@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <app>
-  <publisher>Influent</publisher>
+  <publisher>influent</publisher>
   <app>esvintable</app>
   <name>Esvintable</name>
-  <version>v9.4-26.08-21.56-AlphaCube</version>
-  <correlationid>00baa44f171fe8bb590998545136d8d3e3223de064c25f6c448ff34647bba685</correlationid>
+  <version>v9.4-26.08-21.56</version>
+  <correlationid>4c4cf788877e8b6bfb4e317994c175a3b06e2be4a5b1a249bba06e9b069274bf</correlationid>
   <rate>Todas las edades</rate>
   <author>JesusQuijada34</author>
   <platform>AlphaCube</platform>
