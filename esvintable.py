@@ -13,7 +13,9 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 # Cargar variables de entorno
 load_dotenv()
 # Priorizar el token proporcionado por el usuario
-API_TOKEN = "8425405985:AAHkYur42HpREARgHK8dqfqQ4wGW41p0bvg"
+API_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+QOBUZ_AUTH_TOKEN = os.getenv("QOBUZ_AUTH_TOKEN", "").strip()
+TREBEL_AUTH_TOKEN = os.getenv("TREBEL_AUTH_TOKEN", "").strip()
 CHAT_IDS = [chat_id.strip() for chat_id in os.getenv("CHAT_IDS", "").split(",") if chat_id.strip()]
 ERROR_LIMIT = int(os.getenv("ERROR_LIMIT", 50))
 ERRORS = 0
@@ -81,8 +83,10 @@ async def get_track_info(session, track_id):
         "referer": "https://play.qobuz.com/",
         "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
         "x-app-id": "950096963",
-        "x-user-auth-token": "tmMC4YHiqHc0mBDHHUIg_oS24u6kDT1mw0vRvGSSuO3MpOzdKGNH0FpTWIieWsx3xA8RzPMFs7fZBGJjdpDjew"
+        "x-user-auth-token": QOBUZ_AUTH_TOKEN
     }
+    if not QOBUZ_AUTH_TOKEN:
+        return None
     body = {"tracks_id": [track_id]}
     try:
         async with session.post("https://www.qobuz.com/api.json/0.2/track/getList", headers=headers, data=json.dumps(body)) as response:
@@ -114,9 +118,11 @@ def getcIP():
         return None
 
 async def dl_trebel(isrc):
+    if not TREBEL_AUTH_TOKEN:
+        return None
     s = cloudscraper.create_scraper()
-    t = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIxODkyNDQ0MDEiLCJkZXZpY2VJZCI6IjE1NDAyNjIyMCIsInRyYW5zYWN0aW9uSWQiOjAsImlhdCI6MTc0Mjk4ODg5MX0.Cyj5j4HAmRZpCXQacS8I24p5_hWhIqPdMqb_NVKS4mI"
-    
+    t = TREBEL_AUTH_TOKEN
+
     if not os.path.exists("op"):
         os.makedirs("op")
         

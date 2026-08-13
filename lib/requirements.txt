@@ -1,5 +1,6 @@
 # Dependencias del paquete
 requests==2.31.0
+aiohttp>=3.9
 cloudscraper==1.2.71
 mutagen==1.47.0
 PyQt5==5.15.10

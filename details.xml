@@ -1,11 +1,13 @@
-<?xml version="1.0" ?>
+<?xml version="1.0" encoding="UTF-8"?>
 <app>
   <publisher>Influent</publisher>
   <app>esvintable</app>
   <name>Esvintable</name>
-  <version>v9.4-25.09-12.32</version>
+  <version>v9.4-26.08-23.43-AlphaCube</version>
+  <correlationid>0322ba26de97dd3fcef4fef2ef45d0e07efdb26d41968177c65cc89237734f0d</correlationid>
+  <rate>Todas las edades</rate>
   <author>JesusQuijada34</author>
   <platform>AlphaCube</platform>
-  <correlationid>e1b6716f3908635e0041b870b0549b6a07b1195f6d36bc6bf140a076e12c4721</correlationid>
-  <rate>PERSONAL USE</rate>
+  <description>Proyecto reparado por MoonFix</description>
+  <year>2026</year>
 </app>
